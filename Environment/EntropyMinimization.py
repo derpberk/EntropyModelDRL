@@ -573,6 +573,7 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
                          collision_penalty=collision_penalty,
                          max_distance=max_distance)
 
+        self.GroundTruth.dt = dt
         self.sample_times = None
         self.dt = dt
 
@@ -719,9 +720,9 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
         """ Produce new state """
         self.state = self.update_state()
 
+        self.GroundTruth.step()
+
         return self.state, reward, done, {}
-
-
 
 
 class NonHomogeneousTemporalEntropyMinimization(BaseTemporalEntropyMinimization):
@@ -949,7 +950,7 @@ if __name__ == '__main__':
                                   termination_condition = False,
                                   number_of_trials=5,
                                   discrete=True,
-                                          dt = 0.05)
+                                  dt = 0.05)
 
     """ Reset! """
     env.reset()
