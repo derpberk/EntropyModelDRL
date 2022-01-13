@@ -12,6 +12,7 @@ from MathUtils import conditioning_cov_matrix, conditioning_std, conditioning_co
     conditioning_std_with_time
 
 
+# noinspection DuplicatedCode
 class BaseEntropyMinimization(gym.Env, ABC):
 
     def __init__(self,
@@ -27,9 +28,9 @@ class BaseEntropyMinimization(gym.Env, ABC):
                  number_of_trials=1,
                  number_of_actions=8,
                  max_distance=400,
-                 random_init_point = False,
-                 termination_condition = True,
-                 discrete = True,
+                 random_init_point=False,
+                 termination_condition=True,
+                 safe_mask=False,
                  ):
 
         self.navigation_map = navigation_map
@@ -45,7 +46,7 @@ class BaseEntropyMinimization(gym.Env, ABC):
         self.random_initial_position = random_init_point
         self.termination_condition = termination_condition
         self.number_of_trials = number_of_trials
-        self.discrete = discrete
+        self.safe_mask = safe_mask
 
         """ Create the measurement/evaluation points """
         density = np.round(1 / density_grid)
@@ -73,19 +74,14 @@ class BaseEntropyMinimization(gym.Env, ABC):
 
         """ Gym Parameters """
         # Action space
-        if self.discrete:
-            # Discrete action space divided in 8 different actions
-            # TODO: Not applicable with multi-agent
-            assert self.number_of_agents == 1, "Not implemented discrete actions for multi-agent."
-            self.action_space = gym.spaces.Discrete(number_of_actions)
-            self.angle_set = np.linspace(0,2*np.pi, number_of_actions, endpoint=False)
-        else:
-            self.action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(self.number_of_agents, ))
+        # TODO: Not applicable with multi-agent
+        self.action_space = gym.spaces.Discrete(number_of_actions)
+        self.angle_set = np.linspace(0, 2 * np.pi, number_of_actions, endpoint=False)
 
         # Observation space
         self.observation_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(2 + self.number_of_agents,
-                                                                          self.navigation_map.shape[0],
-                                                                          self.navigation_map.shape[1]))
+                                                                           self.navigation_map.shape[0],
+                                                                           self.navigation_map.shape[1]))
         """ Kernel for conditioning """
         self.kernel = C(constant_value=1.0) * RBF(length_scale=self.lengthscale)
 
@@ -98,7 +94,6 @@ class BaseEntropyMinimization(gym.Env, ABC):
 
         """ Other attributes """
         self.positions = None
-        self.heading_angles = None
         self.waypoints = None
         self.trajectories = None
         self.measured_locations = None
@@ -131,15 +126,13 @@ class BaseEntropyMinimization(gym.Env, ABC):
         """ Starting positions """
 
         if self.random_initial_position:
-            self.initial_positions = self.visitable_locations[np.random.choice(np.arange(0,len(self.visitable_locations)),
-                                                                               self.number_of_agents, replace=False)]
+            self.initial_positions = self.visitable_locations[
+                np.random.choice(np.arange(0, len(self.visitable_locations)),
+                                 self.number_of_agents, replace=False)]
 
         self.positions = np.copy(self.initial_positions)
 
         """ Heading angles """
-        self.heading_angles = np.zeros((self.number_of_agents,))
-        center = np.array(self.navigation_map.shape, dtype = int)/2
-        self.heading_angles = np.asarray([np.arctan2(center[1]-pos[1], center[0]-pos[0]) for pos in self.positions])
         self.waypoints = np.expand_dims(np.copy(self.initial_positions), 0)  # Trajectory of the agent #
         self.trajectories = np.copy(self.waypoints)
         """ Reset the measurements """
@@ -148,7 +141,8 @@ class BaseEntropyMinimization(gym.Env, ABC):
         self.measured_values = self.measure()
         """ Update the covariance matrix and the trace"""
         self.tr0 = np.sum(np.real(np.linalg.eigvals(self.kernel(self.evaluation_locations))))
-        self.covariance_matrix = conditioning_cov_matrix(self.evaluation_locations, self.measured_locations, self.kernel, alpha=self.noise_factor)
+        self.covariance_matrix = conditioning_cov_matrix(self.evaluation_locations, self.measured_locations,
+                                                         self.kernel, alpha=self.noise_factor)
         self.trace = np.sum(np.real(np.linalg.eigvals(self.covariance_matrix)))
 
         self.trace_ant = self.trace
@@ -165,10 +159,14 @@ class BaseEntropyMinimization(gym.Env, ABC):
         state[0] = np.copy(self.navigation_map)
 
         """ The position of the vehicles """
+        if self.trajectories.shape[0] > 1:
+            w = np.linspace(0, 1, len(self.trajectories[0]))
+        else:
+            w = 1.0
 
         for k in range(0, self.number_of_agents):
-            w = np.linspace(0, 1, len(self.trajectories[0]))
-            state[k+1, self.trajectories[k, :, 0], self.trajectories[k, :, 1]] = w
+
+            state[k + 1, self.trajectories[:, k, 0], self.trajectories[:, k, 1]] = w
 
         uncertainty = conditioning_std(self.visitable_locations, self.measured_locations, self.kernel)
 
@@ -201,13 +199,7 @@ class BaseEntropyMinimization(gym.Env, ABC):
 
         done = False
 
-        if self.discrete:
-            angles = np.asarray([self.angle_set[action]])
-        else:
-            move_angles = np.clip(action, self.action_space.low[0], self.action_space.high[0])
-            angles = move_angles * np.pi
-
-        self.heading_angles = angles
+        angles = np.asarray([self.angle_set[action]])
 
         movement = np.array([[self.movement_length * np.cos(angle),
                               self.movement_length * np.sin(angle)] for angle in angles])
@@ -235,15 +227,14 @@ class BaseEntropyMinimization(gym.Env, ABC):
             self.positions = next_intended_positions
             self.waypoints = np.vstack((self.waypoints, [self.positions]))
 
-
             new_trajectories = None
             for k in range(self.number_of_agents):
 
                 if new_trajectories is None:
                     new_trajectories = self.compute_trajectory(self.waypoints[-2, k], self.waypoints[-1, k])
                 else:
-                    new_trajectories = np.hstack(new_trajectories, self.compute_trajectory(self.waypoints[-2, k], self.waypoints[-1, k]))
-
+                    new_trajectories = np.hstack((new_trajectories,
+                                                 self.compute_trajectory(self.waypoints[-2, k], self.waypoints[-1, k])))
 
             self.trajectories = np.hstack((self.trajectories, [new_trajectories]))
 
@@ -313,13 +304,7 @@ class BaseEntropyMinimization(gym.Env, ABC):
 
     def valid_action(self, action):
 
-        if self.discrete:
-            angles = np.asarray([self.angle_set[action]])
-        else:
-            move_angles = np.clip(action, self.action_space.low[0], self.action_space.high[0])
-            angles = move_angles * np.pi
-
-        self.heading_angles = angles
+        angles = np.asarray([self.angle_set[action]])
 
         movement = np.array([[self.movement_length * np.cos(angle),
                               self.movement_length * np.sin(angle)] for angle in angles])
@@ -332,17 +317,16 @@ class BaseEntropyMinimization(gym.Env, ABC):
 
         return not collision
 
-
     def render(self, mode="human"):
 
         plt.ion()
 
         if self.figure is None:
-            self.figure, self.axs = plt.subplots(1,3)
-            self.s0 = self.axs[0].imshow(self.state[0], cmap = 'gray')
-            self.axs[0].plot(self.evaluation_locations[:,1], self.evaluation_locations[:,0], 'r.', alpha=0.3)
-            self.s1 = self.axs[1].imshow(self.state[1], cmap = 'gray', vmin = 0.0, vmax=1.0)
-            self.s2 = self.axs[2].imshow(self.state[2], cmap = 'coolwarm')
+            self.figure, self.axs = plt.subplots(1, 3)
+            self.s0 = self.axs[0].imshow(self.state[0], cmap='gray')
+            self.axs[0].plot(self.evaluation_locations[:, 1], self.evaluation_locations[:, 0], 'r.', alpha=0.3)
+            self.s1 = self.axs[1].imshow(self.state[1], cmap='gray', vmin=0.0, vmax=1.0)
+            self.s2 = self.axs[2].imshow(self.state[2], cmap='coolwarm')
 
         else:
 
@@ -559,7 +543,7 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
                  random_init_point=False,
                  termination_condition=True,
                  discrete=True,
-                 dt = 0.1,
+                 dt=0.1,
                  ):
 
         super().__init__(navigation_map=navigation_map,
@@ -635,7 +619,8 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
             state[k + 1, self.trajectories[k, :, 0], self.trajectories[k, :, 1]] = w
 
         uncertainty = conditioning_std_with_time(self.visitable_locations, self.measured_locations, self.kernel,
-                                                 sample_times=self.sample_times, time=np.max(self.sample_times), weights=1)
+                                                 sample_times=self.sample_times, time=np.max(self.sample_times),
+                                                 weights=1)
 
         state[-1, self.visitable_locations[:, 0], self.visitable_locations[:, 1]] = uncertainty
 
@@ -650,13 +635,7 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
 
         done = False
 
-        if self.discrete:
-            angles = np.asarray([self.angle_set[action]])
-        else:
-            move_angles = np.clip(action, self.action_space.low[0], self.action_space.high[0])
-            angles = move_angles * np.pi
-
-        self.heading_angles = angles
+        angles = np.asarray([self.angle_set[action]])
 
         movement = np.array([[self.movement_length * np.cos(angle),
                               self.movement_length * np.sin(angle)] for angle in angles])
@@ -708,7 +687,7 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
             self.covariance_matrix = conditioning_cov_matrix_with_time(self.evaluation_locations,
                                                                        self.measured_locations,
                                                                        self.kernel, sample_times=self.sample_times,
-                                                                       time=np.max(self.sample_times),weights=1)
+                                                                       time=np.max(self.sample_times), weights=1)
 
             """ Update the trace """
             self.trace_ant = self.trace
@@ -755,8 +734,8 @@ class NonHomogeneousTemporalEntropyMinimization(BaseTemporalEntropyMinimization)
 
         """ New observation space for the non-homogeneous case """
         self.observation_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(3 + self.number_of_agents,
-                                                                          self.navigation_map.shape[0],
-                                                                          self.navigation_map.shape[1]))
+                                                                           self.navigation_map.shape[0],
+                                                                           self.navigation_map.shape[1]))
 
         """ Support Vector Regressor for inference """
         self.Regressor = SVR(kernel="rbf", C=1E5, gamma='scale')
@@ -931,33 +910,30 @@ if __name__ == '__main__':
 
     from utils import plot_trajectory
 
-
     np.random.seed(2)
 
     """ Create the environment """
-    initial_position = [[36, 29]]
+    initial_position = [[36, 29], [46,29]]
     navigation_map = np.genfromtxt('./ypacarai_map_middle.csv')
-    env = BaseTemporalEntropyMinimization(navigation_map=navigation_map,
-                                  number_of_agents=1,
+    env = BaseEntropyMinimization(navigation_map=navigation_map,
+                                  number_of_agents=2,
                                   initial_positions=initial_position,
                                   movement_length=3,
                                   density_grid=0.2,
                                   noise_factor=1E-2,
                                   lengthscale=5,
                                   initial_seed=0,
-                                  max_distance=1000,
+                                  max_distance=200,
                                   random_init_point=False,
-                                  termination_condition = False,
-                                  number_of_trials=5,
-                                  discrete=True,
-                                  dt = 0.05)
+                                  termination_condition=False,
+                                  number_of_trials=5)
 
     """ Reset! """
     env.reset()
 
     # Render environment #
-    #env.render()
-    #plt.pause(0.3)
+    # env.render()
+    # plt.pause(0.3)
 
     r = -1
     d = False
@@ -978,21 +954,18 @@ if __name__ == '__main__':
         Racc += r
         R.append(env.trace)
         print('Reward: ', r)
-        #env.render()
-        #plt.pause(0.1)
-
+        # env.render()
+        # plt.pause(0.1)
 
         # Render environment #
 
     # Final renders #
     env.render()
-    plot_trajectory(env.axs[2], env.waypoints[:, 0, 1], env.waypoints[:, 0, 0], z=None, colormap ='jet', num_of_points = 200, linewidth = 1, k = 1, plot_waypoints=False, markersize = 0.5)
+    plot_trajectory(env.axs[2], env.waypoints[:, 0, 1], env.waypoints[:, 0, 0], z=None, colormap='jet',
+                    num_of_points=200, linewidth=1, k=1, plot_waypoints=False, markersize=0.5)
 
     plt.show(block=True)
 
     plt.plot(R, 'b-o')
     plt.grid()
     plt.show(block=True)
-
-
-
