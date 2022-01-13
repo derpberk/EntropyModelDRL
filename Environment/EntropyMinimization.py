@@ -935,7 +935,7 @@ if __name__ == '__main__':
     np.random.seed(2)
 
     """ Create the environment """
-    initial_position = [[30, 7]]
+    initial_position = [[36, 29]]
     navigation_map = np.genfromtxt('./ypacarai_map_middle.csv')
     env = BaseTemporalEntropyMinimization(navigation_map=navigation_map,
                                   number_of_agents=1,
@@ -945,7 +945,7 @@ if __name__ == '__main__':
                                   noise_factor=1E-2,
                                   lengthscale=5,
                                   initial_seed=0,
-                                  max_distance=1200,
+                                  max_distance=1000,
                                   random_init_point=False,
                                   termination_condition = False,
                                   number_of_trials=5,
@@ -956,8 +956,8 @@ if __name__ == '__main__':
     env.reset()
 
     # Render environment #
-    env.render()
-    plt.pause(0.3)
+    #env.render()
+    #plt.pause(0.3)
 
     r = -1
     d = False
@@ -970,14 +970,17 @@ if __name__ == '__main__':
     while not d:
 
         # Compute next valid position #
+
         while not env.valid_action(actions):
             actions = env.action_space.sample()
+
         s, r, d, _ = env.step(actions)
         Racc += r
-        R.append(Racc)
+        R.append(env.trace)
         print('Reward: ', r)
-        env.render()
-        plt.pause(0.1)
+        #env.render()
+        #plt.pause(0.1)
+
 
         # Render environment #
 
