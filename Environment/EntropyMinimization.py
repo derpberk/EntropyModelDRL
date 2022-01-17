@@ -12,6 +12,155 @@ from MathUtils import conditioning_cov_matrix, conditioning_std, conditioning_co
     conditioning_std_with_time
 
 
+class DiscreteVehicle:
+
+    def __init__(self, initial_position, n_actions, movement_length, navigation_map):
+
+        self.initial_position = initial_position
+        self.position = np.copy(initial_position)
+        self.waypoints = np.expand_dims(np.copy(initial_position),0)
+        self.trajectory = np.copy(self.waypoints)
+
+        self.distance = 0.0
+        self.num_of_collisions = 0
+        self.action_space = gym.spaces.Discrete(n_actions)
+        self.angle_set = np.linspace(0, 2 * np.pi, n_actions, endpoint=False)
+        self.movement_length = movement_length
+        self.navigation_map = navigation_map
+
+    def move(self, action):
+
+        self.distance += self.movement_length
+        angle = self.angle_set[action]
+        movement = np.array([self.movement_length * np.cos(angle), self.movement_length * np.sin(angle)])
+        next_position = self.position + movement
+
+        if self.check_collision(next_position):
+            collide = True
+            self.num_of_collisions += 1
+        else:
+            collide = False
+            self.position = next_position
+            self.waypoints = np.vstack((self.waypoints, [self.position]))
+            self.update_trajectory()
+
+        return valid
+
+    def check_collision(self, next_position):
+
+        if self.navigation_map[int(next_position[0]), int(next_position[1])] == 0:
+            return True
+        return False
+
+    def update_trajectory(self):
+
+        p1 = self.waypoints[-2]
+        p2 = self.waypoints[-1]
+
+        mini_traj = self.compute_trajectory_between_points(p1,p2)
+
+        self.trajectory = np.vstack((self.trajectory, mini_traj))
+
+    @staticmethod
+    def compute_trajectory_between_points(p1, p2):
+        trajectory = None
+
+        p = p1.astype(int)
+        d = p2.astype(int) - p1.astype(int)
+        N = np.max(np.abs(d))
+        s = d / N
+
+        for ii in range(0, N):
+            p = p + s
+            if trajectory is None:
+                trajectory = np.array([np.rint(p)])
+            else:
+                trajectory = np.vstack((trajectory, [np.rint(p)]))
+
+        return trajectory.astype(int)
+
+    def reset(self, initial_position):
+
+        self.initial_position = initial_position
+        self.position = np.copy(initial_position)
+        self.waypoints = np.expand_dims(np.copy(initial_position), 0)
+        self.trajectory = np.copy(self.waypoints)
+        self.distance = 0.0
+        self.num_of_collisions = 0
+
+    def check_action(self, action):
+
+        angle = self.angle_set[action]
+        movement = np.array([self.movement_length * np.cos(angle), self.movement_length * np.sin(angle)])
+        next_position = self.position + movement
+
+        return self.check_collision(next_position)
+
+class DiscreteFleet:
+
+    def __init__(self, number_of_vehicles, n_actions, initial_positions, movement_length, navigation_map):
+
+        self.number_of_vehicles = number_of_vehicles
+        self.initial_positions = initial_positions
+        self.n_actions = n_actions
+        self.movement_length = movement_length
+        self.vehicles = [DiscreteVehicle(initial_position=initial_positions[k],
+                                         n_actions=n_actions,
+                                         movement_length=movement_length,
+                                         navigation_map=navigation_map) for k in range(self.number_of_vehicles)]
+
+        self.measured_values = None
+        self.measured_locations = None
+        self.fleet_collisions = 0
+
+    def move(self, fleet_actions):
+
+        collision_array = [self.vehicles[k].move(fleet_actions[k]) for k in range(self.number_of_vehicles)]
+
+        self.fleet_collisions += np.sum([self.vehicles[k].num_of_collisions for k in range(self.number_of_vehicles)])
+
+        return collision_array
+
+    def measure(self, gt_field):
+
+        """
+        Take a measurement in the given N positions
+        :param gt_field:
+        :return: An numpy array with dims (N,2)
+        """
+        positions = np.array([self.vehicles[k].position for k in range(self.number_of_vehicles)])
+
+        values = []
+        for pos in positions:
+            values.append([gt_field[int(pos[0]), int(pos[1])]])
+
+        if self.measured_locations is None:
+            self.measured_locations = positions
+            self.measured_values = values
+        else:
+            self.measured_locations = np.vstack((self.measured_locations, positions))
+            self.measured_values = np.vstack((self.measured_values, values))
+
+        return self.measured_values, self.measured_locations
+
+    def reset(self, initial_positions):
+
+        for k in range(self.number_of_vehicles):
+            self.vehicles[k].reset(initial_position=initial_positions[k])
+
+        self.measured_values = None
+        self.measured_locations = None
+        self.fleet_collisions = 0
+
+    def get_distances(self):
+
+        return [self.vehicles[k].distance for k in range(self.number_of_vehicles)]
+
+    def check_collisions(self, test_actions):
+
+        return [self.vehicles[k].check_action(test_actions[k]) for k in range(self.number_of_vehicles)]
+
+
 class BaseEntropyMinimization(gym.Env, ABC):
 
     def __init__(self,
@@ -27,9 +176,8 @@ class BaseEntropyMinimization(gym.Env, ABC):
                  number_of_trials=1,
                  number_of_actions=8,
                  max_distance=400,
-                 random_init_point = False,
-                 termination_condition = True,
-                 discrete = True,
+                 random_init_point=False,
+                 termination_condition=True
                  ):
 
         self.navigation_map = navigation_map
@@ -45,7 +193,6 @@ class BaseEntropyMinimization(gym.Env, ABC):
         self.random_initial_position = random_init_point
         self.termination_condition = termination_condition
         self.number_of_trials = number_of_trials
-        self.discrete = discrete
 
         """ Create the measurement/evaluation points """
         density = np.round(1 / density_grid)
@@ -73,19 +220,13 @@ class BaseEntropyMinimization(gym.Env, ABC):
 
         """ Gym Parameters """
         # Action space
-        if self.discrete:
-            # Discrete action space divided in 8 different actions
-            # TODO: Not applicable with multi-agent
-            assert self.number_of_agents == 1, "Not implemented discrete actions for multi-agent."
-            self.action_space = gym.spaces.Discrete(number_of_actions)
-            self.angle_set = np.linspace(0,2*np.pi, number_of_actions, endpoint=False)
-        else:
-            self.action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(self.number_of_agents, ))
+        self.action_space = gym.spaces.Discrete(number_of_actions)
+        self.angle_set = np.linspace(0, 2 * np.pi, number_of_actions, endpoint=False)
 
         # Observation space
         self.observation_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(2 + self.number_of_agents,
-                                                                          self.navigation_map.shape[0],
-                                                                          self.navigation_map.shape[1]))
+                                                                           self.navigation_map.shape[0],
+                                                                           self.navigation_map.shape[1]))
         """ Kernel for conditioning """
         self.kernel = C(constant_value=1.0) * RBF(length_scale=self.lengthscale)
 
@@ -96,11 +237,16 @@ class BaseEntropyMinimization(gym.Env, ABC):
         # Sample a new GT
         self.GroundTruth_field = self.GroundTruth.sample_gt()
 
-        """ Other attributes """
-        self.positions = None
-        self.heading_angles = None
-        self.waypoints = None
-        self.trajectories = None
+
+
+        """ Fleet attributes """
+        self.fleet = DiscreteFleet(number_of_vehicles = self.number_of_agents,
+                                   n_actions = number_of_actions,
+                                   initial_positions = initial_positions,
+                                   movement_length = movement_length,
+                                   navigation_map = navigation_map)
+
+        """ Other variables """
         self.measured_locations = None
         self.measured_values = None
         self.covariance_matrix = None
@@ -109,46 +255,39 @@ class BaseEntropyMinimization(gym.Env, ABC):
         self.state = None
         self.tr0 = None
         self.norm_rew_term = None
-        self.distance = 0
         self.figure, self.axs = None, None
-        self.number_of_collisions = 0
 
         self.seed(self.initial_seed)
 
     def seed(self, seed=None):
         np.random.seed(seed)
 
+    def sample_action_space(self):
+
+        return [self.fleet.vehicles[k].action_space.sample() for k in range(self.number_of_agents)]
+
     def reset(self):
 
         """ Reset the environment """
 
-        """ Reset distance """
-        self.distance = 0
-        self.number_of_collisions = 0
         """ New ground truth """
         self.GroundTruth.reset_gt()
         self.GroundTruth_field = self.GroundTruth.sample_gt()
         """ Starting positions """
 
         if self.random_initial_position:
-            self.initial_positions = self.visitable_locations[np.random.choice(np.arange(0,len(self.visitable_locations)),
-                                                                               self.number_of_agents, replace=False)]
+            self.initial_positions = self.visitable_locations[
+                np.random.choice(np.arange(0, len(self.visitable_locations)),
+                                 self.number_of_agents, replace=False)]
 
-        self.positions = np.copy(self.initial_positions)
-
-        """ Heading angles """
-        self.heading_angles = np.zeros((self.number_of_agents,))
-        center = np.array(self.navigation_map.shape, dtype = int)/2
-        self.heading_angles = np.asarray([np.arctan2(center[1]-pos[1], center[0]-pos[0]) for pos in self.positions])
-        self.waypoints = np.expand_dims(np.copy(self.initial_positions), 0)  # Trajectory of the agent #
-        self.trajectories = np.copy(self.waypoints)
-        """ Reset the measurements """
-        self.measured_locations = np.copy(self.initial_positions)
+        """ Reset fleet """
+        self.fleet.reset(initial_positions=self.initial_positions)
         """ Take new measurements """
-        self.measured_values = self.measure()
+        self.measured_values, self.measured_locations = self.fleet.measure(gt_field=self.GroundTruth_field)
         """ Update the covariance matrix and the trace"""
         self.tr0 = np.sum(np.real(np.linalg.eigvals(self.kernel(self.evaluation_locations))))
-        self.covariance_matrix = conditioning_cov_matrix(self.evaluation_locations, self.measured_locations, self.kernel, alpha=self.noise_factor)
+        self.covariance_matrix = conditioning_cov_matrix(self.evaluation_locations, self.measured_locations,
+                                                         self.kernel, alpha=self.noise_factor)
         self.trace = np.sum(np.real(np.linalg.eigvals(self.covariance_matrix)))
 
         self.trace_ant = self.trace
@@ -165,10 +304,14 @@ class BaseEntropyMinimization(gym.Env, ABC):
         state[0] = np.copy(self.navigation_map)
 
         """ The position of the vehicles """
-
         for k in range(0, self.number_of_agents):
-            w = np.linspace(0, 1, len(self.trajectories[0]))
-            state[k+1, self.trajectories[k, :, 0], self.trajectories[k, :, 1]] = w
+
+            if len(self.fleet.vehicles[k].trajectory) > 1:
+                w = np.linspace(0, 1, len(self.fleet.vehicles[k].trajectory))
+            else:
+                w = 1.0
+
+            state[k + 1, self.fleet.vehicles[k].trajectory[:, 0], self.fleet.vehicles[k].trajectory[:, 1]] = w
 
         uncertainty = conditioning_std(self.visitable_locations, self.measured_locations, self.kernel)
 
@@ -176,84 +319,31 @@ class BaseEntropyMinimization(gym.Env, ABC):
 
         return state
 
-    def measure(self, positions=None):
-        """
-        Take a measurement in the given N positions
-        :param positions: Given positions.
-        :return: An numpy array with dims (N,2)
-        """
-
-        if positions is None:
-            positions = self.positions
-
-        values = []
-        for pos in positions:
-            values.append([self.GroundTruth_field[int(pos[0]), int(pos[1])]])
-
-        return np.asarray(values)
-
     def step(self, action):
         """
         Move the vehicles according to the action
-        :param action: The angle of the movement [-1,1]
+        :param action: The categorical movement
         :return: next state, reward, done, info
         """
 
         done = False
 
-        if self.discrete:
-            angles = np.asarray([self.angle_set[action]])
-        else:
-            move_angles = np.clip(action, self.action_space.low[0], self.action_space.high[0])
-            angles = move_angles * np.pi
+        collition_mask = self.fleet.move(action)
 
-        self.heading_angles = angles
+        if any(collition_mask):
 
-        movement = np.array([[self.movement_length * np.cos(angle),
-                              self.movement_length * np.sin(angle)] for angle in angles])
-
-        # Next intended position given the aforementioned movement #
-        next_intended_positions = self.positions + movement
-
-        # Compute if there is a collision #
-        collision = self.check_collision(next_intended_positions)
-
-        self.distance += self.movement_length
-
-        if collision:
-
-            self.number_of_collisions += 1
-
-            if self.termination_condition or self.number_of_collisions == self.number_of_trials:
+            if self.termination_condition or self.fleet.fleet_collisions == self.number_of_trials:
                 done = True
 
             reward = -np.abs(self.collision_penalty)
 
         else:
 
-            # Update the positions and waypoints
-            self.positions = next_intended_positions
-            self.waypoints = np.vstack((self.waypoints, [self.positions]))
-
-
-            new_trajectories = None
-            for k in range(self.number_of_agents):
-
-                if new_trajectories is None:
-                    new_trajectories = self.compute_trajectory(self.waypoints[-2, k], self.waypoints[-1, k])
-                else:
-                    new_trajectories = np.hstack(new_trajectories, self.compute_trajectory(self.waypoints[-2, k], self.waypoints[-1, k]))
-
-
-            self.trajectories = np.hstack((self.trajectories, [new_trajectories]))
-
-            if self.distance >= self.max_distance:
+            if any(np.array(self.fleet.get_distances()) >= self.max_distance):
                 done = True
 
             """ Take new measurements """
-            new_measurements = self.measure()
-            self.measured_values = np.vstack((self.measured_values, new_measurements))
-            self.measured_locations = np.vstack((self.measured_locations, self.positions))
+            self.measured_values, self.measured_locations = self.fleet.measure(gt_field=self.GroundTruth_field)
 
             """ Update the covariance matrix """
             self.covariance_matrix = conditioning_cov_matrix(self.evaluation_locations, self.measured_locations,
@@ -271,25 +361,6 @@ class BaseEntropyMinimization(gym.Env, ABC):
 
         return self.state, reward, done, {}
 
-    @staticmethod
-    def compute_trajectory(p1, p2):
-
-        trajectory = None
-
-        p = p1.astype(int)
-        d = p2.astype(int) - p1.astype(int)
-        N = np.max(np.abs(d))
-        s = d / N
-
-        for ii in range(0, N):
-            p = p + s
-            if trajectory is None:
-                trajectory = np.array([np.rint(p)])
-            else:
-                trajectory = np.vstack((trajectory, [np.rint(p)]))
-
-        return trajectory.astype(int)
-
     def reward(self):
         """
         The reward function
@@ -302,53 +373,22 @@ class BaseEntropyMinimization(gym.Env, ABC):
 
         return reward
 
-    def check_collision(self, next_positions):
-
-        for position in next_positions:
-
-            if self.navigation_map[int(position[0]), int(position[1])] == 0:
-                return True
-
-        return False
-
-    def valid_action(self, action):
-
-        if self.discrete:
-            angles = np.asarray([self.angle_set[action]])
-        else:
-            move_angles = np.clip(action, self.action_space.low[0], self.action_space.high[0])
-            angles = move_angles * np.pi
-
-        self.heading_angles = angles
-
-        movement = np.array([[self.movement_length * np.cos(angle),
-                              self.movement_length * np.sin(angle)] for angle in angles])
-
-        # Next intended position given the aforementioned movement #
-        next_intended_positions = self.positions + movement
-
-        # Compute if there is a collision #
-        collision = self.check_collision(next_intended_positions)
-
-        return not collision
-
-
     def render(self, mode="human"):
 
         plt.ion()
 
         if self.figure is None:
-            self.figure, self.axs = plt.subplots(1,3)
-            self.s0 = self.axs[0].imshow(self.state[0], cmap = 'gray')
-            self.axs[0].plot(self.evaluation_locations[:,1], self.evaluation_locations[:,0], 'r.', alpha=0.3)
-            self.s1 = self.axs[1].imshow(self.state[1], cmap = 'gray', vmin = 0.0, vmax=1.0)
-            self.s2 = self.axs[2].imshow(self.state[2], cmap = 'coolwarm')
+            self.figure, self.axs = plt.subplots(1, 3)
+            self.s0 = self.axs[0].imshow(self.state[0], cmap='gray')
+            self.axs[0].plot(self.evaluation_locations[:, 1], self.evaluation_locations[:, 0], 'r.', alpha=0.3)
+            self.s1 = self.axs[1].imshow(self.state[1], cmap='gray', vmin=0.0, vmax=1.0)
+            self.s2 = self.axs[2].imshow(self.state[-1], cmap='coolwarm')
 
         else:
 
             self.s0.set_data(self.state[0])
             self.s1.set_data(self.state[1])
-            self.s2.set_data(self.state[2])
+            self.s2.set_data(self.state[-1])
             self.figure.canvas.draw()
             self.figure.canvas.flush_events()
 
@@ -558,8 +598,7 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
                  max_distance=400,
                  random_init_point=False,
                  termination_condition=True,
-                 discrete=True,
-                 dt = 0.1,
+                 dt = 0.1
                  ):
 
         super().__init__(navigation_map=navigation_map,
@@ -571,19 +610,19 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
                          lengthscale=lengthscale,
                          initial_seed=initial_seed,
                          collision_penalty=collision_penalty,
-                         max_distance=max_distance)
+                         number_of_trials=number_of_trials,
+                         number_of_actions=number_of_actions,
+                         max_distance=max_distance,
+                         random_init_point=random_init_point,
+                         termination_condition=termination_condition)
 
         self.GroundTruth.dt = dt
         self.sample_times = None
         self.dt = dt
 
     def reset(self):
-
         """ Reset the environment """
 
-        """ Reset distance """
-        self.distance = 0
-        self.number_of_collisions = 0
         """ New ground truth """
         self.GroundTruth.reset_gt()
         self.GroundTruth_field = self.GroundTruth.sample_gt()
@@ -594,18 +633,10 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
                 np.random.choice(np.arange(0, len(self.visitable_locations)),
                                  self.number_of_agents, replace=False)]
 
-        self.positions = np.copy(self.initial_positions)
-
-        """ Heading angles """
-        self.heading_angles = np.zeros((self.number_of_agents,))
-        center = np.array(self.navigation_map.shape, dtype=int) / 2
-        self.heading_angles = np.asarray([np.arctan2(center[1] - pos[1], center[0] - pos[0]) for pos in self.positions])
-        self.waypoints = np.expand_dims(np.copy(self.initial_positions), 0)  # Trajectory of the agent #
-        self.trajectories = np.copy(self.waypoints)
-        """ Reset the measurements """
-        self.measured_locations = np.copy(self.initial_positions)
+        """ Reset fleet """
+        self.fleet.reset(initial_positions=self.initial_positions)
         """ Take new measurements """
-        self.measured_values = self.measure()
+        self.measured_values, self.measured_locations = self.fleet.measure(gt_field=self.GroundTruth_field)
         self.sample_times = np.zeros_like(self.measured_values)
         """ Update the covariance matrix and the trace"""
         self.tr0 = np.sum(np.real(np.linalg.eigvals(self.kernel(self.evaluation_locations))))
@@ -629,86 +660,60 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
         state[0] = np.copy(self.navigation_map)
 
         """ The position of the vehicles """
-
         for k in range(0, self.number_of_agents):
-            w = np.linspace(0, 1, len(self.trajectories[0]))
-            state[k + 1, self.trajectories[k, :, 0], self.trajectories[k, :, 1]] = w
+
+            if len(self.fleet.vehicles[k].trajectory) > 1:
+                w = np.linspace(0, 1, len(self.fleet.vehicles[k].trajectory))
+            else:
+                w = 1.0
+
+            state[k + 1, self.fleet.vehicles[k].trajectory[:, 0], self.fleet.vehicles[k].trajectory[:, 1]] = w
 
         uncertainty = conditioning_std_with_time(self.visitable_locations, self.measured_locations, self.kernel,
-                                                 sample_times=self.sample_times, time=np.max(self.sample_times), weights=1)
+                                                 sample_times=self.sample_times, time=np.max(self.sample_times),
+                                                 weights=1)
 
         state[-1, self.visitable_locations[:, 0], self.visitable_locations[:, 1]] = uncertainty
 
         return state
 
     def step(self, action):
+
         """
         Move the vehicles according to the action
-        :param action: The angle of the movement [-1,1]
+        :param action: The categorical movement
         :return: next state, reward, done, info
         """
 
         done = False
 
-        if self.discrete:
-            angles = np.asarray([self.angle_set[action]])
-        else:
-            move_angles = np.clip(action, self.action_space.low[0], self.action_space.high[0])
-            angles = move_angles * np.pi
+        collition_mask = self.fleet.move(action)
 
-        self.heading_angles = angles
+        if any(collition_mask):
 
-        movement = np.array([[self.movement_length * np.cos(angle),
-                              self.movement_length * np.sin(angle)] for angle in angles])
-
-        # Next intended position given the aforementioned movement #
-        next_intended_positions = self.positions + movement
-
-        # Compute if there is a collision #
-        collision = self.check_collision(next_intended_positions)
-
-        self.distance += self.movement_length
-
-        if collision:
-
-            self.number_of_collisions += 1
-
-            if self.termination_condition or self.number_of_collisions == self.number_of_trials:
+            if self.termination_condition or self.fleet.fleet_collisions == self.number_of_trials:
                 done = True
 
             reward = -np.abs(self.collision_penalty)
 
         else:
 
-            # Update the positions and waypoints
-            self.positions = next_intended_positions
-            self.waypoints = np.vstack((self.waypoints, [self.positions]))
-
-            new_trajectories = None
-            for k in range(self.number_of_agents):
-
-                if new_trajectories is None:
-                    new_trajectories = self.compute_trajectory(self.waypoints[-2, k], self.waypoints[-1, k])
-                else:
-                    new_trajectories = np.hstack(new_trajectories,
-                                                 self.compute_trajectory(self.waypoints[-2, k], self.waypoints[-1, k]))
-
-            self.trajectories = np.hstack((self.trajectories, [new_trajectories]))
-
-            if self.distance >= self.max_distance:
+            if any(np.array(self.fleet.get_distances()) >= self.max_distance):
                 done = True
 
-            """ Take new measurements """
-            new_measurements = self.measure()
-            self.measured_values = np.vstack((self.measured_values, new_measurements))
-            self.measured_locations = np.vstack((self.measured_locations, self.positions))
+            """ Take new measurements with time """
+            self.measured_values, self.measured_locations = self.fleet.measure(gt_field=self.GroundTruth_field)
             self.sample_times = np.vstack((self.sample_times, self.sample_times[-self.number_of_agents:] + self.dt))
 
             """ Update the covariance matrix """
             self.covariance_matrix = conditioning_cov_matrix_with_time(self.evaluation_locations,
                                                                        self.measured_locations,
                                                                        self.kernel, sample_times=self.sample_times,
-                                                                       time=np.max(self.sample_times),weights=1)
+                                                                       time=np.max(self.sample_times), weights=1)
+
+            """ Update the covariance matrix """
+            self.covariance_matrix = conditioning_cov_matrix(self.evaluation_locations, self.measured_locations,
+                                                             self.kernel, alpha=self.noise_factor)
 
             """ Update the trace """
             self.trace_ant = self.trace
@@ -719,8 +724,6 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
 
         """ Produce new state """
         self.state = self.update_state()
-
-        self.GroundTruth.step()
 
         return self.state, reward, done, {}
 
@@ -755,8 +758,8 @@ class NonHomogeneousTemporalEntropyMinimization(BaseTemporalEntropyMinimization)
 
         """ New observation space for the non-homogeneous case """
         self.observation_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(3 + self.number_of_agents,
-                                                                          self.navigation_map.shape[0],
-                                                                          self.navigation_map.shape[1]))
+                                                                           self.navigation_map.shape[0],
+                                                                           self.navigation_map.shape[1]))
 
         """ Support Vector Regressor for inference """
         self.Regressor = SVR(kernel="rbf", C=1E5, gamma='scale')
@@ -931,7 +934,6 @@ if __name__ == '__main__':
 
     from utils import plot_trajectory
 
-
     np.random.seed(2)
 
     """ Create the environment """
@@ -939,25 +941,24 @@ if __name__ == '__main__':
     navigation_map = np.genfromtxt('./ypacarai_map_middle.csv')
     env = BaseTemporalEntropyMinimization(navigation_map=navigation_map,
                                   number_of_agents=1,
+                                          number_of_actions=12,
                                   initial_positions=initial_position,
                                   movement_length=3,
                                   density_grid=0.2,
                                   noise_factor=1E-2,
                                   lengthscale=5,
                                   initial_seed=0,
-                                  max_distance=1000,
+                                  max_distance=200,
                                   random_init_point=False,
-                                  termination_condition = False,
+                                  termination_condition=False,
                                   number_of_trials=5,
-                                  discrete=True,
-                                  dt = 0.05)
+                                  dt=0.1)
 
     """ Reset! """
     env.reset()
-
-    # Render environment #
-    #env.render()
-    #plt.pause(0.3)
+    env.render()
+    plt.pause(0.5)
+    plt.show(block=True)
 
     r = -1
     d = False
@@ -965,34 +966,29 @@ if __name__ == '__main__':
     Racc = 0
     R = []
 
-    actions = env.action_space.sample()
 
     while not d:
 
         # Compute next valid position #
 
-        while not env.valid_action(actions):
-            actions = env.action_space.sample()
+        actions = env.sample_action_space()
 
         s, r, d, _ = env.step(actions)
         Racc += r
         R.append(env.trace)
         print('Reward: ', r)
-        #env.render()
-        #plt.pause(0.1)
-
+        env.render()
+        plt.pause(0.5)
 
         # Render environment #
 
     # Final renders #
     env.render()
-    plot_trajectory(env.axs[2], env.waypoints[:, 0, 1], env.waypoints[:, 0, 0], z=None, colormap ='jet', num_of_points = 200, linewidth = 1, k = 1, plot_waypoints=False, markersize = 0.5)
+    plot_trajectory(env.axs[2], env.fleet.vehicles[0].waypoints[:, 1], env.fleet.vehicles[0].waypoints[:, 0], z=None, colormap='jet',
+                    num_of_points=500, linewidth=4, k=3, plot_waypoints=False, markersize=0.5)
 
     plt.show(block=True)
 
     plt.plot(R, 'b-o')
     plt.grid()
     plt.show(block=True)
-
-
-
