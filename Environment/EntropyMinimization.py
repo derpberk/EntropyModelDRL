@@ -44,7 +44,7 @@ class DiscreteVehicle:
             self.waypoints = np.vstack((self.waypoints, [self.position]))
             self.update_trajectory()
 
-        return valid
+        return collide
 
     def check_collision(self, next_position):
 
@@ -117,7 +117,7 @@ class DiscreteFleet:
 
         collision_array = [self.vehicles[k].move(fleet_actions[k]) for k in range(self.number_of_vehicles)]
 
-        self.fleet_collisions += np.sum([self.vehicles[k].num_of_collisions for k in range(self.number_of_vehicles)])
+        self.fleet_collisions = np.sum([self.vehicles[k].num_of_collisions for k in range(self.number_of_vehicles)])
 
         return collision_array
 
@@ -159,7 +159,6 @@ class DiscreteFleet:
     def check_collisions(self, test_actions):
 
         return [self.vehicles[k].check_action(test_actions[k]) for k in range(self.number_of_vehicles)]
-
 
 class BaseEntropyMinimization(gym.Env, ABC):
 
@@ -328,11 +327,14 @@ class BaseEntropyMinimization(gym.Env, ABC):
 
         done = False
 
+        if not isinstance(action, list):
+            action = [action]
+
         collition_mask = self.fleet.move(action)
 
         if any(collition_mask):
 
-            if self.termination_condition or self.fleet.fleet_collisions == self.number_of_trials:
+            if self.termination_condition or self.fleet.fleet_collisions >= self.number_of_trials:
                 done = True
 
             reward = -np.abs(self.collision_penalty)
@@ -393,193 +395,6 @@ class BaseEntropyMinimization(gym.Env, ABC):
             self.figure.canvas.flush_events()
 
         plt.pause(0.1)
-
-
-class NonHomogeneousEntropyMinimization(BaseEntropyMinimization):
-
-    def __init__(self,
-                 navigation_map,
-                 number_of_agents: int,
-                 initial_positions: list,
-                 movement_length: int,
-                 density_grid: float,
-                 noise_factor: float,
-                 lengthscale: float,
-                 initial_seed=0,
-                 collision_penalty=-1,
-                 max_distance=400,
-                 ):
-
-        super().__init__(navigation_map=navigation_map,
-                         number_of_agents=number_of_agents,
-                         initial_positions=initial_positions,
-                         movement_length=movement_length,
-                         density_grid=density_grid,
-                         noise_factor=noise_factor,
-                         lengthscale=lengthscale,
-                         initial_seed=initial_seed,
-                         collision_penalty=collision_penalty,
-                         max_distance=max_distance)
-
-        """ New observation space for the non-homogeneous case """
-        self.observation_space = gym.spaces.Box(low=0.0, high=1.0, shape=(3 + self.number_of_agents,
-                                                                          self.navigation_map.shape[0],
-                                                                          self.navigation_map.shape[1]))
-
-        """ Support Vector Regressor for inference """
-        self.Regressor = SVR(kernel="rbf", C=1E3, gamma='scale')
-
-    def reset(self):
-
-        """ Reset the environment """
-
-        """ Reset distance """
-        self.distance = 0
-        """ New ground truth """
-        self.GroundTruth.reset_gt()
-        self.GroundTruth_field = self.GroundTruth.sample_gt()
-        """ Starting positions """
-        self.positions = np.copy(self.initial_positions)
-        """ Reset the measurements """
-        self.measured_locations = np.copy(self.initial_positions)
-        """ Take new measurements """
-        self.measured_values = self.measure()
-        """ Fit the regression model """
-        self.Regressor.fit(self.measured_locations, self.measured_values.squeeze(axis=1))
-        """ Estimate the model """
-        estimated_values = self.Regressor.predict(self.visitable_locations)
-        self.estimated_model = np.copy(self.navigation_map)
-        self.estimated_model[self.visitable_locations[:, 0], self.visitable_locations[:, 1]] = estimated_values
-        """ Update the covariance matrix and the trace"""
-        self.tr0 = np.sum(np.real(np.linalg.eigvals(self.kernel(self.evaluation_locations))))
-        self.covariance_matrix = conditioning_cov_matrix(self.evaluation_locations, self.measured_locations,
-                                                         self.kernel)
-        self.trace = np.sum(np.real(np.linalg.eigvals(self.covariance_matrix)))
-        self.trace_ant = self.trace
-        self.norm_rew_term = self.tr0 - self.trace
-        """ Produce new state """
-        self.state = self.update_state()
-
-        return self.state
-
-    def step(self, action):
-        """
-            Move the vehicles according to the action
-            :param action: The angle of the movement [-1,1]
-            :return: next state, reward, done, info
-            """
-
-        done = False
-
-        angles = np.clip(action, self.action_space.low[0], self.action_space.high[0])
-        movement = np.array([[self.movement_length * np.cos(np.pi * angle),
-                              self.movement_length * np.sin(np.pi * angle)] for angle in angles])
-
-        # Next intended position given the aforementioned movement #
-        next_intended_positions = self.positions + movement
-
-        # Compute if there is a collision #
-        collision = self.check_collision(next_intended_positions)
-
-        if collision:
-            done = True
-            reward = -np.abs(self.collision_penalty)
-        else:
-
-            # Update the positions
-            self.positions = next_intended_positions
-
-            self.distance += self.movement_length
-
-            if self.distance >= self.max_distance:
-                done = True
-
-            """ Take new measurements """
-            new_measurements = self.measure()
-            self.measured_values = np.vstack((self.measured_values, new_measurements))
-            self.measured_locations = np.vstack((self.measured_locations, self.positions))
-
-            """ Fit the regression model """
-            self.Regressor.fit(self.measured_locations, self.measured_values.squeeze(axis=1))
-
-            """ Estimate the model """
-            estimated_values = self.Regressor.predict(self.visitable_locations)
-
-            self.estimated_model = np.copy(self.navigation_map)
-            self.estimated_model[self.visitable_locations[:, 0], self.visitable_locations[:, 1]] = estimated_values
-
-            """ Update the covariance matrix """
-            self.covariance_matrix = conditioning_cov_matrix(self.evaluation_locations, self.measured_locations,
-                                                             self.kernel)
-
-            """ Update the trace """
-            self.trace_ant = self.trace
-            self.trace = np.sum(np.real(np.linalg.eigvals(self.covariance_matrix)))
-
-            """ Compute reward """
-            reward = self.reward()
-
-        """ Produce new state """
-        self.state = self.update_state()
-
-        return self.state, reward, done, {}
-
-    def update_state(self):
-
-        state = np.zeros((3 + self.number_of_agents, self.navigation_map.shape[0], self.navigation_map.shape[1]))
-
-        """ The boundaries of the map """
-        state[0] = np.clip(np.copy(self.navigation_map), 0.0, 1.0)
-
-        """ The position of the vehicles """
-        for i in range(0, self.number_of_agents):
-            state[i + 1, int(self.positions[i, 0]), int(self.positions[i, 1])] = 1.0
-
-        uncertainty = conditioning_std(self.visitable_locations, self.measured_locations, self.kernel)
-
-        state[-1, self.visitable_locations[:, 0], self.visitable_locations[:, 1]] = uncertainty
-
-        estimated_model_normalized = (self.estimated_model - np.min(self.estimated_model)) / (
-                np.max(self.estimated_model) - np.min(self.estimated_model))
-
-        state[-2] = self.navigation_map - 1 + estimated_model_normalized
-
-        return state
-
-    def reward(self):
-        """
-        The reward function
-
-        :return: The information gain defined as Tr{t} - Tr{t+1}
-        """
-
-        information_gain = self.trace_ant - self.trace
-
-        """ Computed as: w = yt/max(y)"""
-        normalized_y = (self.measured_values - np.min(self.measured_values)) / (
-                np.max(self.measured_values) - np.min(self.measured_values))
-        information_weight = np.clip(np.mean(normalized_y[-self.number_of_agents:]), 0.2, 1.0)
-
-        return information_gain * information_weight / self.norm_rew_term
-
-    def render(self, mode="human", first=True):
-
-        if first:
-            fig, self.axs = plt.subplots(1, 2)
-
-        if mode == 'human':
-
-            colors = matplotlib.cm.get_cmap('jet', self.number_of_agents)
-            colors = colors(range(self.number_of_agents))
-            self.axs[0].imshow(self.state[-1])
-            self.axs[0].set_title("Uncertainty")
-            self.axs[1].imshow(self.state[-2])
-            self.axs[1].set_title("Model")
-
-            for color, pos in zip(colors, self.positions):
-                self.axs[0].plot(pos[1], pos[0], 'x', color=color)
-                self.axs[1].plot(pos[1], pos[0], 'x', color=color)
-
 
 class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
 
@@ -685,13 +500,16 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
         :return: next state, reward, done, info
         """
 
+        if not isinstance(action, list):
+            action = [action]
+
         done = False
 
         collition_mask = self.fleet.move(action)
 
         if any(collition_mask):
 
-            if self.termination_condition or self.fleet.fleet_collisions == self.number_of_trials:
+            if self.termination_condition or self.fleet.fleet_collisions >= self.number_of_trials:
                 done = True
 
             reward = -np.abs(self.collision_penalty)
@@ -728,208 +546,6 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
         return self.state, reward, done, {}
 
 
-class NonHomogeneousTemporalEntropyMinimization(BaseTemporalEntropyMinimization):
-
-    def __init__(self,
-                 navigation_map,
-                 number_of_agents: int,
-                 initial_positions: list,
-                 movement_length: int,
-                 density_grid: float,
-                 noise_factor: float,
-                 lengthscale: float,
-                 initial_seed=0,
-                 collision_penalty=-1,
-                 max_distance=400,
-                 dt=0.1
-                 ):
-
-        super().__init__(navigation_map=navigation_map,
-                         number_of_agents=number_of_agents,
-                         initial_positions=initial_positions,
-                         movement_length=movement_length,
-                         density_grid=density_grid,
-                         noise_factor=noise_factor,
-                         lengthscale=lengthscale,
-                         initial_seed=initial_seed,
-                         collision_penalty=collision_penalty,
-                         max_distance=max_distance,
-                         dt=dt)
-
-        """ New observation space for the non-homogeneous case """
-        self.observation_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(3 + self.number_of_agents,
-                                                                           self.navigation_map.shape[0],
-                                                                           self.navigation_map.shape[1]))
-
-        """ Support Vector Regressor for inference """
-        self.Regressor = SVR(kernel="rbf", C=1E5, gamma='scale')
-
-    def reset(self):
-
-        """ Reset the environment """
-
-        """ Reset distance """
-        self.distance = 0
-        """ New ground truth """
-        self.GroundTruth.reset_gt()
-        self.GroundTruth_field = self.GroundTruth.sample_gt()
-        """ Starting positions """
-        self.positions = np.copy(self.initial_positions)
-        """ Reset the measurements """
-        self.measured_locations = np.copy(self.initial_positions)
-        """ Take new measurements """
-        self.measured_values = self.measure()
-        self.sample_times = np.zeros_like(self.measured_values)
-        """ Fit the regression model """
-        self.Regressor.fit(self.measured_locations, self.measured_values.squeeze(axis=1))
-        """ Estimate the model """
-        self.estimated_model = self.Regressor.predict(self.visitable_locations)
-        self.estimated_model_matrix = np.copy(self.navigation_map)
-        self.estimated_model_matrix[
-            self.visitable_locations[:, 0], self.visitable_locations[:, 1]] = self.estimated_model
-
-        """ Update the covariance matrix and the trace"""
-        self.tr0 = np.sum(np.real(np.linalg.eigvals(self.kernel(self.evaluation_locations))))
-        self.covariance_matrix = conditioning_cov_matrix_with_time(self.evaluation_locations, self.measured_locations,
-                                                                   self.kernel, sample_times=self.sample_times,
-                                                                   weights=np.array([1.0]),
-                                                                   time=0.0)
-        self.trace = np.sum(np.real(np.linalg.eigvals(self.covariance_matrix)))
-        self.trace_ant = self.trace
-        self.norm_rew_term = self.tr0 - self.trace
-        """ Produce new state """
-        self.state = self.update_state()
-
-        return self.state
-
-    def update_state(self):
-
-        state = np.zeros((3 + self.number_of_agents, self.navigation_map.shape[0], self.navigation_map.shape[1]))
-
-        """ The boundaries of the map """
-        state[0] = np.clip(np.copy(self.navigation_map), 0.0, 1.0)
-
-        """ The position of the vehicles """
-        for i in range(0, self.number_of_agents):
-            state[i + 1, int(self.positions[i, 0]), int(self.positions[i, 1])] = 1.0
-
-        weights = np.abs((self.measured_values - np.mean(self.measured_values)) / len(self.measured_values))
-        if len(weights) > 1:
-            weights = weights / np.linalg.norm(weights.squeeze(1))
-
-        uncertainty = conditioning_std_with_time(self.visitable_locations, self.measured_locations, self.kernel,
-                                                 sample_times=self.sample_times, time=np.max(self.sample_times),
-                                                 weights=weights.squeeze(1))
-
-        state[-1, self.visitable_locations[:, 0], self.visitable_locations[:, 1]] = uncertainty
-
-        estimated_model_normalized = (self.estimated_model - np.min(self.estimated_model) + 1E-5) / (
-                np.max(self.estimated_model) - np.min(self.estimated_model) + 1E-5)
-
-        state[-2] = np.copy(self.navigation_map) - 1
-        state[-2, self.visitable_locations[:, 0], self.visitable_locations[:, 1]] = estimated_model_normalized
-
-        return state
-
-    def step(self, action):
-        """
-        Move the vehicles according to the action
-        :param action: The angle of the movement [-1,1]
-        :return: next state, reward, done, info
-        """
-
-        done = False
-
-        angles = np.clip(action, self.action_space.low[0], self.action_space.high[0])
-        movement = np.array([[self.movement_length * np.cos(np.pi * angle),
-                              self.movement_length * np.sin(np.pi * angle)] for angle in angles])
-
-        # Next intended position given the aforementioned movement #
-        next_intended_positions = self.positions + movement
-
-        # Compute if there is a collision #
-        collision = self.check_collision(next_intended_positions)
-
-        if collision:
-            done = True
-            reward = -np.abs(self.collision_penalty)
-        else:
-
-            # Update the positions
-            self.positions = next_intended_positions
-
-            self.distance += self.movement_length
-
-            if self.distance >= self.max_distance:
-                done = True
-
-            """ Take new measurements """
-            new_measurements = self.measure()
-            self.measured_values = np.vstack((self.measured_values, new_measurements))
-            self.measured_locations = np.vstack((self.measured_locations, self.positions))
-            self.sample_times = np.vstack((self.sample_times, self.sample_times[-self.number_of_agents:] + self.dt))
-
-            """ Fit the regression model """
-            self.Regressor.fit(self.measured_locations, self.measured_values.squeeze(axis=1))
-
-            """ Estimate the model """
-            self.estimated_model = self.Regressor.predict(self.visitable_locations)
-            self.estimated_model_matrix = np.copy(self.navigation_map)
-            self.estimated_model_matrix[
-                self.visitable_locations[:, 0], self.visitable_locations[:, 1]] = self.estimated_model
-
-            """ Update the covariance matrix """
-            weights = np.abs((self.measured_values - np.mean(self.measured_values)) / len(self.measured_values))
-            weights = weights / np.linalg.norm(weights.squeeze(1))
-            self.covariance_matrix = conditioning_cov_matrix_with_time(self.evaluation_locations,
-                                                                       self.measured_locations,
-                                                                       self.kernel, sample_times=self.sample_times,
-                                                                       weights=weights.squeeze(1),
-                                                                       time=np.max(self.sample_times))
-
-            """ Update the trace """
-            self.trace_ant = self.trace
-            self.trace = np.sum(np.real(np.linalg.eigvals(self.covariance_matrix)))
-
-            """ Compute reward """
-            reward = self.reward()
-
-        """ Produce new state """
-        self.state = self.update_state()
-
-        return self.state, reward, done, {}
-
-    def render(self, mode="human", first=True):
-
-        if first:
-            fig, self.axs = plt.subplots(1, 2)
-
-        if mode == 'human':
-
-            colors = matplotlib.cm.get_cmap('jet', self.number_of_agents)
-            colors = colors(range(self.number_of_agents))
-            unc = self.state[-1]
-            unc[self.navigation_map == 0] = np.nan
-            self.axs[0].imshow(self.state[-1], cmap='gray_r')
-            self.axs[0].set_title("Uncertainty")
-            model = self.state[-2]
-            model[self.navigation_map == 0] = np.nan
-            self.axs[1].imshow(self.state[-2], cmap='coolwarm')
-            self.axs[1].set_title("Model")
-
-            for color, pos in zip(colors, self.positions):
-                self.axs[0].plot(pos[1], pos[0], '.', color=color, markersize=1)
-                self.axs[1].plot(pos[1], pos[0], '.', color=color, markersize=1)
-
-    def compute_mse(self):
-
-        mse = mean_squared_error(
-            y_true=self.GroundTruth_field[self.visitable_locations[:, 0], self.visitable_locations[:, 1]],
-            y_pred=self.estimated_model)
-
-        return mse
-
-
 if __name__ == '__main__':
 
     from utils import plot_trajectory
@@ -948,7 +564,7 @@ if __name__ == '__main__':
                                   noise_factor=1E-2,
                                   lengthscale=5,
                                   initial_seed=0,
-                                  max_distance=200,
+                                  max_distance=1000,
                                   random_init_point=False,
                                   termination_condition=False,
                                   number_of_trials=5,
@@ -957,8 +573,8 @@ if __name__ == '__main__':
     """ Reset! """
     env.reset()
     env.render()
-    plt.pause(0.5)
-    plt.show(block=True)
+    plt.pause(0.1)
+
 
     r = -1
     d = False
@@ -973,12 +589,12 @@ if __name__ == '__main__':
 
         actions = env.sample_action_space()
 
-        s, r, d, _ = env.step(actions)
+        s, r, d, _ = env.step(0)
         Racc += r
         R.append(env.trace)
         print('Reward: ', r)
         env.render()
-        plt.pause(0.5)
+        plt.pause(0.1)
 
         # Render environment #
 
