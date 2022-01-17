@@ -37,6 +37,7 @@ class DuelingDQNAgent:
 			noisy: bool = False,
 			logdir=None,
 			log_name="Experiment",
+			safe_actions=False,
 	):
 		"""
 
@@ -54,6 +55,7 @@ class DuelingDQNAgent:
 		:param number_of_features: Number of features after the visual extractor
 		:param logdir: Directory to save the tensorboard log
 		:param log_name: Name of the tb log
+		:param safe_actions: Safe action flag
 		"""
 
 		""" Logging parameters """
@@ -66,6 +68,7 @@ class DuelingDQNAgent:
 		action_dim = env.action_space.n
 
 		""" Agent embeds the environment """
+		self.safe_action = safe_actions
 		self.env = env
 		self.batch_size = batch_size
 		self.target_update = target_update
@@ -246,7 +249,11 @@ class DuelingDQNAgent:
 
 			while not done:
 
-				action = self.select_action(state)
+				if not self.safe_action:
+					action = self.select_action(state)
+				else:
+					action = self.safe_select_action(state)
+
 				next_state, reward, done = self.step(action)
 
 				state = next_state

@@ -19,7 +19,6 @@ environment_args = {'navigation_map': navigation_map,
                     'number_of_actions':8,
                     'random_init_point': True,
                     'termination_condition': False,
-                    'discrete': True
                     }
 
 env = BaseEntropyMinimization(**environment_args)
@@ -44,7 +43,7 @@ agent = DuelingDQNAgent(env=env,
                         log_name="Experiment"
                         )
 
-agent.load_model(r'/Volumes/GoogleDrive/Mi unidad/SharedFolder/EntropyModelDRL/Learning/EntropyMinimizationLearning/runs/Jan07_13-08-53_DESKTOP-43A6A7G/BestPolicy.pth')
+agent.load_model(r'/Volumes/GoogleDrive/Mi unidad/SharedFolder/EntropyModelDRL/Learning/EntropyMinimizationLearning/runs/Dueling_PER_Noisy_8_actions/BestPolicy.pth')
 agent.epsilon = 0
 env.reset()
 env.render()

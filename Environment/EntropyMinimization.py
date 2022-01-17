@@ -396,6 +396,13 @@ class BaseEntropyMinimization(gym.Env, ABC):
 
         plt.pause(0.1)
 
+    def valid_action(self, a):
+        assert self.number_of_agents == 1, "Not implemented for Multi-Agent!"
+
+        # Return the action valid flag #
+        return not self.fleet.check_collisions([a])[0]
+
+
 class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
 
     def __init__(self,
