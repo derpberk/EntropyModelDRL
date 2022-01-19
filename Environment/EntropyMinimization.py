@@ -96,6 +96,15 @@ class DiscreteVehicle:
 
         return self.check_collision(next_position)
 
+    def move_to_position(self, goal_position):
+
+        """ Add the distance """
+        assert self.navigation_map[goal_position[0], goal_position[1]] == 1, "Invalid position to move"
+        self.distance += np.linalg.norm(goal_position-self.position)
+        """ Update the position """
+        self.position = goal_position
+
+
 class DiscreteFleet:
 
     def __init__(self, number_of_vehicles, n_actions, initial_positions, movement_length, navigation_map):
@@ -159,6 +168,18 @@ class DiscreteFleet:
     def check_collisions(self, test_actions):
 
         return [self.vehicles[k].check_action(test_actions[k]) for k in range(self.number_of_vehicles)]
+
+    def move_fleet_to_positions(self, goal_list):
+        """ Move the fleet to the given positions.
+         All goal positions must ve valid. """
+
+        goal_list = np.atleast_2d(goal_list)
+
+        for k in range(self.number_of_vehicles):
+            self.vehicles[k].move_to_position(goal_position=goal_list[k])
+
+
+
 
 class BaseEntropyMinimization(gym.Env, ABC):
 
@@ -401,6 +422,35 @@ class BaseEntropyMinimization(gym.Env, ABC):
 
         # Return the action valid flag #
         return not self.fleet.check_collisions([a])[0]
+
+    def step_to_position(self, desired_positions):
+        """ Travel to the given position and take a sample """
+
+        done = False
+
+        self.fleet.move_fleet_to_positions(desired_positions)
+
+        """ Take new measurements """
+        self.measured_values, self.measured_locations = self.fleet.measure(gt_field=self.GroundTruth_field)
+
+        """ Update the covariance matrix """
+        self.covariance_matrix = conditioning_cov_matrix(self.evaluation_locations, self.measured_locations,
+                                                         self.kernel, alpha=self.noise_factor)
+
+        """ Update the trace """
+        self.trace_ant = self.trace
+        self.trace = np.sum(np.real(np.linalg.eigvals(self.covariance_matrix)))
+
+        """ Compute reward """
+        reward = self.reward()
+
+        """ Produce new state """
+        self.state = self.update_state()
+
+        if any(np.array(self.fleet.get_distances()) >= self.max_distance):
+            done = True
+
+        return self.state, reward, done, {}
 
 
 class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
