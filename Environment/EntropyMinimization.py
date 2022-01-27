@@ -586,9 +586,6 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
                                                                        self.kernel, sample_times=self.sample_times,
                                                                        time=np.max(self.sample_times), weights=1)
 
-            """ Update the covariance matrix """
-            self.covariance_matrix = conditioning_cov_matrix(self.evaluation_locations, self.measured_locations,
-                                                             self.kernel, alpha=self.noise_factor)
 
             """ Update the trace """
             self.trace_ant = self.trace
@@ -601,6 +598,40 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
         self.state = self.update_state()
 
         return self.state, reward, done, {}
+
+    def step_to_position(self, desired_positions):
+        """ Travel to the given position and take a sample """
+
+        done = False
+
+        self.fleet.move_fleet_to_positions(desired_positions)
+
+        """ Take new measurements """
+        self.measured_values, self.measured_locations = self.fleet.measure(gt_field=self.GroundTruth_field)
+        self.sample_times = np.vstack((self.sample_times, self.sample_times[-self.number_of_agents:] + self.dt))
+
+        """ Update the covariance matrix """
+        self.covariance_matrix = conditioning_cov_matrix_with_time(self.evaluation_locations,
+                                                                   self.measured_locations,
+                                                                   self.kernel, sample_times=self.sample_times,
+                                                                   time=np.max(self.sample_times), weights=1)
+
+        """ Update the trace """
+        self.trace_ant = self.trace
+        self.trace = np.sum(np.real(np.linalg.eigvals(self.covariance_matrix)))
+
+        """ Compute reward """
+        reward = self.reward()
+
+        """ Produce new state """
+        self.state = self.update_state()
+
+        if any(np.array(self.fleet.get_distances()) >= self.max_distance):
+            done = True
+
+        return self.state, reward, done, {}
+
+
 
 
 if __name__ == '__main__':

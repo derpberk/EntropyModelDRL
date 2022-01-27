@@ -1,6 +1,6 @@
 import numpy as np
 import random
-from Environment.EntropyMinimization import BaseEntropyMinimization
+from Environment.EntropyMinimization import BaseEntropyMinimization, BaseTemporalEntropyMinimization
 from EnvironmentUtils import AStarPlanner
 from utils import plot_trajectory
 
