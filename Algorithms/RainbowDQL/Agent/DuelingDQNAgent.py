@@ -191,6 +191,11 @@ class DuelingDQNAgent:
 		new_priorities = loss_for_prior + self.prior_eps
 		self.memory.update_priorities(indices, new_priorities)
 
+		# Reset the noisy layers
+		if self.noisy_layers:
+			self.dqn.reset_noise()
+			self.dqn_target.reset_noise()
+
 		return loss.item()
 
 	@staticmethod
