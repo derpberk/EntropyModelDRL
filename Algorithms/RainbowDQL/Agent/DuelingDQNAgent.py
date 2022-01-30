@@ -192,7 +192,7 @@ class DuelingDQNAgent:
 		self.memory.update_priorities(indices, new_priorities)
 
 		# Reset the noisy layers
-		if self.noisy_layers:
+		if self.noisy:
 			self.dqn.reset_noise()
 			self.dqn_target.reset_noise()
 
@@ -241,6 +241,10 @@ class DuelingDQNAgent:
 			score = 0
 			length = 0
 			losses = []
+
+			if self.noisy:
+				self.dqn.reset_noise()
+				self.dqn_target.reset_noise()
 
 			# PER: Increase beta temperature
 			self.beta = self.anneal_beta(p=episode / episodes, p_init=0, p_fin=0.9, b_init=0.4, b_end=1.0)

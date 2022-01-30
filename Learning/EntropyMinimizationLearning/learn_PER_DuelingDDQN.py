@@ -2,7 +2,7 @@ import torch
 from Algorithms.RainbowDQL.Agent.DuelingDQNAgent import DuelingDQNAgent
 import numpy as np
 import random
-from Environment.EntropyMinimization import BaseEntropyMinimization
+from Environment.EntropyMinimization import BaseEntropyMinimization, BaseTemporalEntropyMinimization
 
 seed = 777
 
@@ -25,15 +25,17 @@ environment_args = {'navigation_map': navigation_map,
                     'lengthscale': 5,
                     'initial_seed': 0,
                     'collision_penalty': -1,
-                    'max_distance': 200,
+                    'max_distance': 1000,
                     'number_of_trials': 5,
-                    'number_of_actions': 12,
+                    'number_of_actions': 8,
                     'random_init_point': True,
                     'termination_condition': False,
-                    'discrete': True
+                    # 'dt': 0.05,
                     }
 
 env = BaseEntropyMinimization(**environment_args)
+
+#env = BaseTemporalEntropyMinimization(**environment_args)
 
 agent_args = {'env': env,
               'memory_size': 100000,
@@ -50,7 +52,7 @@ agent_args = {'env': env,
               'beta': 0.4,
               'prior_eps': 1e-6,
               'logdir': None,
-              'noisy': True,
+              'noisy': False,
               'log_name': "Experiment"}
 
 agent = DuelingDQNAgent(**agent_args)
