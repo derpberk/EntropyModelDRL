@@ -631,6 +631,18 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
 
         return self.state, reward, done, {}
 
+    def reward(self):
+        """
+        The reward function
+
+        :return: The information gain defined as Tr{t} - Tr{t+1}
+        """
+
+        information_gain = self.trace_ant - self.trace
+        reward = 0 if information_gain < 0.01 else information_gain
+
+        return reward
+
 
 
 
@@ -645,7 +657,7 @@ if __name__ == '__main__':
     navigation_map = np.genfromtxt('./ypacarai_map_middle.csv')
     env = BaseTemporalEntropyMinimization(navigation_map=navigation_map,
                                   number_of_agents=1,
-                                          number_of_actions=12,
+                                  number_of_actions=8,
                                   initial_positions=initial_position,
                                   movement_length=3,
                                   density_grid=0.2,
