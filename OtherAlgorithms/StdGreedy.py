@@ -24,14 +24,15 @@ environment_args = {'navigation_map': navigation_map,
                     'lengthscale': 5,
                     'initial_seed': 0,
                     'collision_penalty': -1,
-                    'max_distance': 200,
+                    'max_distance': 600,
                     'number_of_trials': 5,
                     'number_of_actions': 8,
                     'random_init_point': True,
-                    'termination_condition': False
+                    'termination_condition': False,
+					'dt': 0.05
                     }
 
-env = BaseEntropyMinimization(**environment_args)
+env = BaseTemporalEntropyMinimization(**environment_args)
 env.reset()
 planner = AStarPlanner(env.navigation_map, 1, 0.5)
 # N executions of the algorithm
@@ -71,7 +72,7 @@ for i in range(N):
 			goal_achieved = False
 
 		s, r, done, _ = env.step_to_position(sliced_path[path_index])
-		print(T)
+		print(env.fleet.get_distances())
 		path_index += 1
 
 		if path_index == len(sliced_path):

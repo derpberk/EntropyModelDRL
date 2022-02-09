@@ -25,12 +25,12 @@ environment_args = {'navigation_map': navigation_map,
                     'lengthscale': 5,
                     'initial_seed': 0,
                     'collision_penalty': -1,
-                    'max_distance': 1000,
-                    'number_of_trials': 5,
+                    'max_distance': 200,
+                    'number_of_trials': 12,
                     'number_of_actions': 8,
                     'random_init_point': True,
                     'termination_condition': False,
-                    # 'dt': 0.05,
+                    #'dt': 0.05,
                     }
 
 env = BaseEntropyMinimization(**environment_args)
@@ -52,8 +52,10 @@ agent_args = {'env': env,
               'beta': 0.4,
               'prior_eps': 1e-6,
               'logdir': None,
-              'noisy': False,
-              'log_name': "Experiment"}
+              'noisy': True,
+              'log_name': "Experiment",
+              'safe_actions': True,
+              'train_every': 1}
 
 agent = DuelingDQNAgent(**agent_args)
 

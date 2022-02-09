@@ -38,6 +38,7 @@ class DuelingDQNAgent:
 			logdir=None,
 			log_name="Experiment",
 			safe_actions=False,
+			train_every=1,
 	):
 		"""
 
@@ -81,6 +82,7 @@ class DuelingDQNAgent:
 		self.epsilon = self.epsilon_values[0]
 		self.learning_starts = learning_starts
 		self.noisy = noisy
+		self.train_every = train_every
 
 		""" Automatic selection of the device """
 		self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -221,6 +223,8 @@ class DuelingDQNAgent:
 	def train(self, episodes):
 		""" Train the agent. """
 
+		steps = 0
+
 		# Create train logger #
 		if self.writer is None:
 			self.writer = SummaryWriter(log_dir=self.logdir, filename_suffix=self.experiment_name)
@@ -258,6 +262,8 @@ class DuelingDQNAgent:
 
 			while not done:
 
+				steps+=1
+
 				if not self.safe_action:
 					action = self.select_action(state)
 				else:
@@ -294,7 +300,7 @@ class DuelingDQNAgent:
 						self.save_model(name='BestPolicy.pth')
 
 				# if training is ready
-				if len(self.memory) >= self.batch_size and episode >= self.learning_starts:
+				if len(self.memory) >= self.batch_size and episode >= self.learning_starts and steps % self.train_every == 0:
 
 					loss = self.update_model()
 					losses.append(loss)

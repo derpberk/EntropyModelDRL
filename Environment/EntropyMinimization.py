@@ -639,7 +639,7 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
         """
 
         information_gain = self.trace_ant - self.trace
-        reward = 0 if information_gain < 0.01 else information_gain
+        reward = -0.5 if information_gain < 0.01 else information_gain
 
         return reward
 
@@ -664,11 +664,11 @@ if __name__ == '__main__':
                                   noise_factor=1E-2,
                                   lengthscale=5,
                                   initial_seed=0,
-                                  max_distance=1000,
+                                  max_distance=400,
                                   random_init_point=False,
                                   termination_condition=False,
                                   number_of_trials=5,
-                                  dt=0.1)
+                                  dt=0.05)
 
     """ Reset! """
     env.reset()
