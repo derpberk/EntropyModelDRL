@@ -315,6 +315,7 @@ class DuelingDQNAgent:
 		self.is_eval = True
 
 		scores = []
+		entropies = []
 
 		for e in range(episodes):
 
@@ -333,7 +334,7 @@ class DuelingDQNAgent:
 				else:
 					action = self.safe_select_action(state)
 				next_state, reward, done = self.step(action)
-				#print('Score ', reward)
+
 				state = next_state
 				score += reward
 
@@ -342,10 +343,14 @@ class DuelingDQNAgent:
 
 			print(f"Episode {e} total score: {score}")
 			scores.append(score)
+			entropies.append(self.env.trace)
 
 		print(f"Mean Reward: {np.mean(scores)} +- {np.std(scores)}")
+		print(f"Mean Trace: {np.mean(entropies)} +- {np.std(entropies)}")
 
 		self.is_eval = False
+
+		return entropies
 
 	def _compute_dqn_loss(self, samples: Dict[str, np.ndarray]) -> torch.Tensor:
 		"""Return dqn loss."""
