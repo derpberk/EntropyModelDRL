@@ -1,8 +1,5 @@
 from abc import ABC
 import matplotlib
-
-matplotlib.use('Qt5Agg')
-
 import matplotlib.pyplot as plt
 import numpy as np
 import gym
@@ -19,22 +16,23 @@ class ContinuousVehicle:
         self.initial_position = initial_position
         self.position = np.copy(initial_position)
         self.heading_angle = 0
-        self.waypoints = np.expand_dims(np.copy(initial_position),0)
+        self.waypoints = np.expand_dims(np.copy(initial_position), 0)
         self.trajectory = np.copy(self.waypoints)
 
         self.distance = 0.0
         self.num_of_collisions = 0
-        self.action_space = gym.spaces.Box(low = -1, high = 1, shape=(2,))
+        self.action_space = gym.spaces.Box(low=-1, high=1, shape=(2,))
         self.movement_length_interval = movement_length_interval
         self.navigation_map = navigation_map
 
     def move(self, action):
 
         # Longitud del movimiento
-        length = self.movement_length_interval[0] + ((self.movement_length_interval[1] - self.movement_length_interval[0])/2) * (action[1] + 1)
+        length = self.movement_length_interval[0] + (
+                    (self.movement_length_interval[1] - self.movement_length_interval[0]) / 2) * (action[1] + 1)
         self.distance += length
         # Ángulo de desplazamiento
-        angle = ((2*np.pi - 0)/2)*(action[0] + 1)
+        angle = ((2 * np.pi - 0) / 2) * (action[0] + 1)
         self.heading_angle = angle
 
         movement = np.array([length * np.cos(angle), length * np.sin(angle)])
@@ -53,7 +51,7 @@ class ContinuousVehicle:
 
     def check_collision(self, next_position):
 
-        next_position = np.clip(next_position, a_min=(0,0), a_max=np.array(self.navigation_map.shape)-1)
+        next_position = np.clip(next_position, a_min=(0, 0), a_max=np.array(self.navigation_map.shape) - 1)
         if self.navigation_map[int(next_position[0]), int(next_position[1])] == 0:
             return True
         return False
@@ -63,7 +61,7 @@ class ContinuousVehicle:
         p1 = self.waypoints[-2]
         p2 = self.waypoints[-1]
 
-        mini_traj = self.compute_trajectory_between_points(p1,p2)
+        mini_traj = self.compute_trajectory_between_points(p1, p2)
 
         self.trajectory = np.vstack((self.trajectory, mini_traj))
 
@@ -98,7 +96,7 @@ class ContinuousVehicle:
 
         # Longitud del movimiento
         length = self.movement_length_interval[0] + (
-                    (self.movement_length_interval[1] - self.movement_length_interval[0]) / 2) * (action[1] + 1)
+                (self.movement_length_interval[1] - self.movement_length_interval[0]) / 2) * (action[1] + 1)
         # Ángulo de desplazamiento
         angle = ((2 * np.pi - 0) / 2) * (action[0] + 1)
 
@@ -111,7 +109,7 @@ class ContinuousVehicle:
 
         """ Add the distance """
         assert self.navigation_map[goal_position[0], goal_position[1]] == 1, "Invalid position to move"
-        self.distance += np.linalg.norm(goal_position-self.position)
+        self.distance += np.linalg.norm(goal_position - self.position)
         """ Update the position """
         self.position = goal_position
 
@@ -125,8 +123,8 @@ class ContinuousFleet:
 
         self.movement_length_interval = movement_length_interval
         self.vehicles = [ContinuousVehicle(initial_position=initial_positions[k],
-                                         movement_length_interval=movement_length_interval,
-                                         navigation_map=navigation_map) for k in range(self.number_of_vehicles)]
+                                           movement_length_interval=movement_length_interval,
+                                           navigation_map=navigation_map) for k in range(self.number_of_vehicles)]
 
         self.measured_values = None
         self.measured_locations = None
@@ -202,7 +200,7 @@ class GaussianProcessModeling(gym.Env, ABC):
                  max_distance=1000,
                  random_init_point=False,
                  termination_condition=False,
-                 number_of_trials=5,):
+                 number_of_trials=5, ):
 
         self.navigation_map = navigation_map
         self.number_of_agents = number_of_agents
@@ -249,7 +247,7 @@ class GaussianProcessModeling(gym.Env, ABC):
                                      navigation_map=navigation_map)
 
         """ Gaussian Process Regressor """
-        self.GP = GaussianProcessRegressor(kernel=self.kernel, alpha=self.noise_factor)
+        self.GP = GaussianProcessRegressor(kernel=self.kernel, alpha=self.noise_factor, n_restarts_optimizer=20)
 
         self.measured_locations = None
         self.measured_values = None
@@ -278,7 +276,7 @@ class GaussianProcessModeling(gym.Env, ABC):
 
         if self.random_init_point:
             self.initial_positions = self.visitable_locations[
-                np.random.choice(np.arange(0, len(self.visitable_locations)),self.number_of_agents, replace=False)]
+                np.random.choice(np.arange(0, len(self.visitable_locations)), self.number_of_agents, replace=False)]
 
         """ Reset fleet """
         self.fleet.reset(initial_positions=self.initial_positions)
@@ -289,8 +287,9 @@ class GaussianProcessModeling(gym.Env, ABC):
         """ Predict GP """
         self.mu, self.sigma = self.GP.predict(self.all_locations, return_std=True)
         """ Compute the mse """
-        self.mse = mean_squared_error(y_true=self.GroundTruth_field[np.where(self.navigation_map==1)],
-                                      y_pred=self.mu.reshape(self.navigation_map.shape)[np.where(self.navigation_map == 1)])
+        self.mse = mean_squared_error(y_true=self.GroundTruth_field[np.where(self.navigation_map == 1)],
+                                      y_pred=self.mu.reshape((self.navigation_map.shape[1], self.navigation_map.shape[0])).T[
+                                          np.where(self.navigation_map == 1)])
         """ Produce new state """
         self.state = self.update_state()
 
@@ -306,7 +305,7 @@ class GaussianProcessModeling(gym.Env, ABC):
         """ The mean of the map """
 
         mu_img = self.mu.reshape((self.navigation_map.shape[1], self.navigation_map.shape[0])).T
-        state[1] = (mu_img - self.mu.min())/(self.mu.max() - self.mu.min())
+        state[1] = (mu_img - self.mu.min()) / (self.mu.max() - self.mu.min())
 
         """ The unct of the map """
         std_img = self.sigma.reshape((self.navigation_map.shape[1], self.navigation_map.shape[0])).T
@@ -321,7 +320,6 @@ class GaussianProcessModeling(gym.Env, ABC):
                 w = 1.0
 
             state[k + 3, self.fleet.vehicles[k].trajectory[:, 0], self.fleet.vehicles[k].trajectory[:, 1]] = w
-
 
         return state
 
@@ -357,7 +355,8 @@ class GaussianProcessModeling(gym.Env, ABC):
             self.mu, self.sigma = self.GP.predict(self.all_locations, return_std=True)
             """ Compute the mse """
             self.mse = mean_squared_error(y_true=self.GroundTruth_field[np.where(self.navigation_map == 1)],
-                                          y_pred=self.mu.reshape(self.navigation_map.shape)[np.where(self.navigation_map == 1)])
+                                          y_pred=self.mu.reshape(self.navigation_map.shape)[
+                                              np.where(self.navigation_map == 1)])
 
             """ Compute reward """
             reward = self.reward()
@@ -376,50 +375,69 @@ class GaussianProcessModeling(gym.Env, ABC):
         plt.ion()
 
         if self.figure is None:
-            self.figure, self.axs = plt.subplots(1, 4)
+            self.figure, self.axs = plt.subplots(1, 5)
             self.s0 = self.axs[0].imshow(self.state[0], cmap='gray', vmin=0.0, vmax=1.0)
+            self.s00 = self.axs[0].plot(self.measured_locations[:,1], self.measured_locations[:,0], 'x')
             self.s1 = self.axs[1].imshow(self.state[1], cmap='gray', vmin=0.0, vmax=1.0)
             self.s2 = self.axs[2].imshow(self.state[2], cmap='gray', vmin=0.0, vmax=1.0)
             self.s3 = self.axs[3].imshow(self.state[3], cmap='gray', vmin=0.0, vmax=1.0)
+            self.s4 = self.axs[4].imshow((self.GroundTruth_field - self.GroundTruth_field.min()) / (self.GroundTruth_field.max() - self.GroundTruth_field.min() ), cmap='gray', vmin=0.0, vmax=1.0)
 
         else:
 
             self.s0.set_data(self.state[0])
+            self.axs[0].plot(self.measured_locations[:,1], self.measured_locations[:,0], 'x')
             self.s1.set_data(self.state[1])
             self.s2.set_data(self.state[2])
             self.s3.set_data(self.state[3])
+
             self.figure.canvas.draw()
             self.figure.canvas.flush_events()
 
         plt.pause(0.1)
 
+    def valid_action(self, a):
+        assert self.number_of_agents == 1, "Not implemented for Multi-Agent!"
 
+        # Return the action valid flag #
+        return not self.fleet.check_collisions(a)[0]
 
 
 if __name__ == '__main__':
     """ Create the environment """
-    initial_position = [[36, 29],[36,19]]
+    initial_position = [[36, 29]]
     navigation_map = np.genfromtxt('./ypacarai_map_middle.csv')
 
-    env =  GaussianProcessModeling(navigation_map = navigation_map,
-                 number_of_agents = 2,
-                 initial_positions = initial_position,
-                 movement_length_interval = [3,20],
-                 noise_factor=1E-5,
-                 lengthscale=5,
-                 initial_seed=0,
-                 max_distance=100,
-                 random_init_point=False,
-                 termination_condition=False,
-                 number_of_trials=5,)
+    # Number of sensors #
+    N_of_sensors = 8
+    # Position of sensors #
+    mesh = np.meshgrid(np.linspace(0, navigation_map.shape[0], N_of_sensors, endpoint=False),
+                       np.linspace(0, navigation_map.shape[1], N_of_sensors, endpoint=False))
+    all_locations = np.vstack((mesh[0].flatten(), mesh[1].flatten())).T.astype(int)
+    sensor_positions = []
+    # Select those values that are visitable
+    for position in all_locations:
+        if navigation_map[position[0], position[1]] == 1:
+            sensor_positions.append(list(position))
 
+    sensor_positions = np.asarray(sensor_positions)
+
+    env = GaussianProcessModeling(navigation_map=navigation_map,
+                                  number_of_agents=sensor_positions.shape[0],
+                                  initial_positions=sensor_positions,
+                                  movement_length_interval=[3, 20],
+                                  noise_factor=1E-4,
+                                  lengthscale=2,
+                                  initial_seed=0,
+                                  max_distance=500,
+                                  random_init_point=False,
+                                  termination_condition=False,
+                                  number_of_trials=5, )
 
     env.reset()
+
+    print("MSE: ", env.mse)
+
+
     env.render()
-
-    done = False
-    while not done:
-        env.step(np.random.rand(2,2)*2 - 1)
-        env.render()
-
     plt.show(block=True)
