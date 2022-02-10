@@ -315,13 +315,14 @@ class DuelingDQNAgent:
 		# Save the final policy #
 		self.save_model(name='FINALPolicy.pth')
 
-	def evaluate_policy(self, episodes=1, render=False, safe=False):
+	def evaluate_policy(self, episodes=1, render=False):
 		"""Evaluate the current policy."""
 
 		self.is_eval = True
 
 		scores = []
 		entropies = []
+		redundant = 0
 
 		for e in range(episodes):
 
@@ -335,14 +336,18 @@ class DuelingDQNAgent:
 
 			while not done:
 
-				if not safe:
+				if not self.safe_action:
 					action = self.select_action(state)
 				else:
 					action = self.safe_select_action(state)
+
 				next_state, reward, done = self.step(action)
 
 				state = next_state
 				score += reward
+
+				if reward == -0.5:
+					redundant +=1
 
 				if render:
 					self.env.render()
@@ -353,6 +358,7 @@ class DuelingDQNAgent:
 
 		print(f"Mean Reward: {np.mean(scores)} +- {np.std(scores)}")
 		print(f"Mean Trace: {np.mean(entropies)} +- {np.std(entropies)}")
+		print(f"Mean redundant: {redundant/episodes}")
 
 		self.is_eval = False
 
