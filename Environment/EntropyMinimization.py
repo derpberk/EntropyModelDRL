@@ -18,7 +18,7 @@ class DiscreteVehicle:
 
         self.initial_position = initial_position
         self.position = np.copy(initial_position)
-        self.waypoints = np.expand_dims(np.copy(initial_position),0)
+        self.waypoints = np.expand_dims(np.copy(initial_position), 0)
         self.trajectory = np.copy(self.waypoints)
 
         self.distance = 0.0
@@ -57,7 +57,7 @@ class DiscreteVehicle:
         p1 = self.waypoints[-2]
         p2 = self.waypoints[-1]
 
-        mini_traj = self.compute_trajectory_between_points(p1,p2)
+        mini_traj = self.compute_trajectory_between_points(p1, p2)
 
         self.trajectory = np.vstack((self.trajectory, mini_traj))
 
@@ -100,7 +100,7 @@ class DiscreteVehicle:
 
         """ Add the distance """
         assert self.navigation_map[goal_position[0], goal_position[1]] == 1, "Invalid position to move"
-        self.distance += np.linalg.norm(goal_position-self.position)
+        self.distance += np.linalg.norm(goal_position - self.position)
         """ Update the position """
         self.position = goal_position
 
@@ -179,8 +179,6 @@ class DiscreteFleet:
             self.vehicles[k].move_to_position(goal_position=goal_list[k])
 
 
-
-
 class BaseEntropyMinimization(gym.Env, ABC):
 
     def __init__(self,
@@ -257,14 +255,12 @@ class BaseEntropyMinimization(gym.Env, ABC):
         # Sample a new GT
         self.GroundTruth_field = self.GroundTruth.sample_gt()
 
-
-
         """ Fleet attributes """
-        self.fleet = DiscreteFleet(number_of_vehicles = self.number_of_agents,
-                                   n_actions = number_of_actions,
-                                   initial_positions = initial_positions,
-                                   movement_length = movement_length,
-                                   navigation_map = navigation_map)
+        self.fleet = DiscreteFleet(number_of_vehicles=self.number_of_agents,
+                                   n_actions=number_of_actions,
+                                   initial_positions=initial_positions,
+                                   movement_length=movement_length,
+                                   navigation_map=navigation_map)
 
         """ Other variables """
         self.measured_locations = None
@@ -276,7 +272,7 @@ class BaseEntropyMinimization(gym.Env, ABC):
         self.tr0 = None
         self.norm_rew_term = None
         self.figure, self.axs = None, None
-
+        self.random_peaks = None
         self.seed(self.initial_seed)
 
     def seed(self, seed=None):
@@ -293,6 +289,12 @@ class BaseEntropyMinimization(gym.Env, ABC):
         """ New ground truth """
         self.GroundTruth.reset_gt()
         self.GroundTruth_field = self.GroundTruth.sample_gt()
+
+        """ 10 random located events in the ground truth """
+        self.random_peaks = self.visitable_locations[np.random.choice(np.arange(0, len(self.visitable_locations)),
+                                                                      10,
+                                                                      replace=False)]
+
         """ Starting positions """
 
         if self.random_initial_position:
@@ -382,7 +384,7 @@ class BaseEntropyMinimization(gym.Env, ABC):
         """ Produce new state """
         self.state = self.update_state()
 
-        return self.state, reward, done, {}
+        return self.state, reward, done, self.metrics()
 
     def reward(self):
         """
@@ -401,17 +403,19 @@ class BaseEntropyMinimization(gym.Env, ABC):
         plt.ion()
 
         if self.figure is None:
-            self.figure, self.axs = plt.subplots(1, 3)
+            self.figure, self.axs = plt.subplots(1, 4)
             self.s0 = self.axs[0].imshow(self.state[0], cmap='gray')
             self.axs[0].plot(self.evaluation_locations[:, 1], self.evaluation_locations[:, 0], 'r.', alpha=0.3)
             self.s1 = self.axs[1].imshow(self.state[1], cmap='gray', vmin=0.0, vmax=1.0)
             self.s2 = self.axs[2].imshow(self.state[-1], cmap='coolwarm')
+            self.s3 = self.axs[3].imshow(self.GroundTruth_field, cmap='viridis')
 
         else:
 
             self.s0.set_data(self.state[0])
             self.s1.set_data(self.state[1])
             self.s2.set_data(self.state[-1])
+            self.s3.set_data(self.GroundTruth_field)
             self.figure.canvas.draw()
             self.figure.canvas.flush_events()
 
@@ -450,7 +454,18 @@ class BaseEntropyMinimization(gym.Env, ABC):
         if any(np.array(self.fleet.get_distances()) >= self.max_distance):
             done = True
 
-        return self.state, reward, done, {}
+        return self.state, reward, done, self.metrics()
+
+    def metrics(self):
+
+        metric_dict = {"Entropy": self.trace,
+                       "Area": np.sum(
+                           self.state[-1, self.visitable_locations[:, 0], self.visitable_locations[:, 1]] < 0.05),
+                       "DetectionRate": np.sum(
+                           self.state[-1, self.random_peaks[:, 0].astype(int), self.random_peaks[:, 1].astype(int)] < 0.05) / 10
+                       }
+
+        return metric_dict
 
 
 class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
@@ -470,7 +485,7 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
                  max_distance=400,
                  random_init_point=False,
                  termination_condition=True,
-                 dt = 0.1
+                 dt=0.1
                  ):
 
         super().__init__(navigation_map=navigation_map,
@@ -488,9 +503,10 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
                          random_init_point=random_init_point,
                          termination_condition=termination_condition)
 
-        self.GroundTruth.dt = dt
+        self.GroundTruth.dt = 0.01
         self.sample_times = None
         self.dt = dt
+        self.metrics_dict = None
 
     def reset(self):
         """ Reset the environment """
@@ -498,6 +514,12 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
         """ New ground truth """
         self.GroundTruth.reset_gt()
         self.GroundTruth_field = self.GroundTruth.sample_gt()
+
+        """ 10 random located events in the ground truth """
+        self.random_peaks = self.visitable_locations[np.random.choice(np.arange(0, len(self.visitable_locations)),
+                                                                      10,
+                                                                      replace=False)]
+
         """ Starting positions """
 
         if self.random_initial_position:
@@ -521,6 +543,14 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
 
         """ Produce new state """
         self.state = self.update_state()
+
+        """ Initialize metrics to integrate """
+        self.metrics_dict = {"Entropy": self.trace,
+                             "Area": np.sum(
+                                 self.state[-1, self.visitable_locations[:, 0], self.visitable_locations[:, 1]] < 0.05),
+                             "DetectionRate": np.sum(
+                                 self.state[-1, self.random_peaks[:, 0], self.random_peaks[:, 1]] < 0.05) / 10
+                             }
 
         return self.state
 
@@ -586,7 +616,6 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
                                                                        self.kernel, sample_times=self.sample_times,
                                                                        time=np.max(self.sample_times), weights=1)
 
-
             """ Update the trace """
             self.trace_ant = self.trace
             self.trace = np.sum(np.real(np.linalg.eigvals(self.covariance_matrix)))
@@ -594,10 +623,21 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
             """ Compute reward """
             reward = self.reward()
 
+            """ Update ground truth dynamic """
+            self.GroundTruth.step()
+            self.GroundTruth_field = self.GroundTruth.sample_gt()
+
+            v = np.random.random(size=(len(self.random_peaks), 2)) * 2 - 1.0
+            self.random_peaks = self.random_peaks + v
+
+
         """ Produce new state """
         self.state = self.update_state()
 
-        return self.state, reward, done, {}
+
+
+
+        return self.state, reward, done, self.update_metrics()
 
     def step_to_position(self, desired_positions):
         """ Travel to the given position and take a sample """
@@ -643,7 +683,13 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
 
         return reward
 
+    def update_metrics(self):
 
+        self.metrics_dict["Entropy"] += self.trace * self.dt
+        self.metrics_dict["Area"] += np.sum(self.state[-1, self.visitable_locations[:, 0], self.visitable_locations[:, 1]] < 0.05) * self.dt
+        self.metrics_dict["DetectionRate"] += np.sum(self.state[-1, self.random_peaks[:, 0].astype(int), self.random_peaks[:, 1].astype(int)] < 0.05) / 10 * self.dt
+
+        return self.metrics_dict
 
 
 if __name__ == '__main__':
@@ -668,13 +714,12 @@ if __name__ == '__main__':
                                   random_init_point=False,
                                   termination_condition=False,
                                   number_of_trials=5,
-                                  dt=0.05)
+                                  dt=0.1)
 
     """ Reset! """
     env.reset()
     env.render()
     plt.pause(0.1)
-
 
     r = -1
     d = False
@@ -682,25 +727,25 @@ if __name__ == '__main__':
     Racc = 0
     R = []
 
-
     while not d:
-
         # Compute next valid position #
 
         actions = env.sample_action_space()
 
-        s, r, d, _ = env.step(0)
+        s, r, d, m = env.step(0)
         Racc += r
-        R.append(env.trace)
+        R.append(m['Entropy'])
         print('Reward: ', r)
         env.render()
+        env.axs[2].plot(env.random_peaks[:, 1], env.random_peaks[:, 0], 'xb')
         plt.pause(0.1)
 
         # Render environment #
 
     # Final renders #
     env.render()
-    plot_trajectory(env.axs[2], env.fleet.vehicles[0].waypoints[:, 1], env.fleet.vehicles[0].waypoints[:, 0], z=None, colormap='jet',
+    plot_trajectory(env.axs[2], env.fleet.vehicles[0].waypoints[:, 1], env.fleet.vehicles[0].waypoints[:, 0], z=None,
+                    colormap='jet',
                     num_of_points=500, linewidth=4, k=3, plot_waypoints=False, markersize=0.5)
 
     plt.show(block=True)

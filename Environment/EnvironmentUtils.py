@@ -19,12 +19,22 @@ class GroundTruth:
         self.A = np.random.RandomState(self.seed).random(size=(self.num_of_peaks, 2))
         self.C = np.ones((self.num_of_peaks)) * 0.05
         self.Z = None
+        self.direction_counter = 0
 
 
     def step(self):
 
-        bm = np.random.random(size=(self.num_of_peaks, 2)) * 2 - 1.0
-        self.A = self.A + bm * self.dt
+        self.direction_counter += 1
+        self.A = self.A + self.vA * self.dt
+
+        if self.direction_counter > 10:
+            self.vA = np.random.random(size=(self.num_of_peaks, 2)) * 2 - 1
+            self.direction_counter = 0
+
+        self.A = np.clip(self.A, 0, 1)
+
+
+
 
     def sample_gt(self):
 
@@ -43,6 +53,7 @@ class GroundTruth:
         self.A = np.random.RandomState(self.seed).random(size=(self.num_of_peaks,2))
         self.vA = np.random.RandomState(self.seed).random(size=(self.num_of_peaks, 2))
         self.C = np.ones((self.num_of_peaks)) * 0.05 #np.random.RandomState(self.seed).normal(0.05,0.01, size = num_of_peaks)
+        self.direction_counter = 0
 
 
     def shekel_arg0(self,sol):
