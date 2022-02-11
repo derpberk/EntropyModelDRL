@@ -310,7 +310,8 @@ class BaseEntropyMinimization(gym.Env, ABC):
         self.tr0 = np.sum(np.real(np.linalg.eigvals(self.kernel(self.evaluation_locations))))
         self.covariance_matrix = conditioning_cov_matrix(self.evaluation_locations, self.measured_locations,
                                                          self.kernel, alpha=self.noise_factor)
-        self.trace = np.sum(np.real(np.linalg.eigvals(self.covariance_matrix)))
+
+        self.trace = self.covariance_matrix.trace()
 
         self.trace_ant = self.trace
         """ Produce new state """
@@ -376,7 +377,7 @@ class BaseEntropyMinimization(gym.Env, ABC):
 
             """ Update the trace """
             self.trace_ant = self.trace
-            self.trace = np.sum(np.real(np.linalg.eigvals(self.covariance_matrix)))
+            self.trace = self.covariance_matrix.trace()
 
             """ Compute reward """
             reward = self.reward()
@@ -537,7 +538,7 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
         self.covariance_matrix = conditioning_cov_matrix_with_time(self.evaluation_locations, self.measured_locations,
                                                                    self.kernel, sample_times=self.sample_times,
                                                                    time=0.0, weights=1)
-        self.trace = np.sum(np.real(np.linalg.eigvals(self.covariance_matrix)))
+        self.trace = self.covariance_matrix.trace()
 
         self.trace_ant = self.trace
 
@@ -618,7 +619,7 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
 
             """ Update the trace """
             self.trace_ant = self.trace
-            self.trace = np.sum(np.real(np.linalg.eigvals(self.covariance_matrix)))
+            self.trace = self.covariance_matrix.trace()
 
             """ Compute reward """
             reward = self.reward()
@@ -633,9 +634,6 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
 
         """ Produce new state """
         self.state = self.update_state()
-
-
-
 
         return self.state, reward, done, self.update_metrics()
 
