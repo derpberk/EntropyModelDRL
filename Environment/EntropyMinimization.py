@@ -468,6 +468,11 @@ class BaseEntropyMinimization(gym.Env, ABC):
 
         return metric_dict
 
+    def get_action_mask(self):
+
+        mask = np.array(list(map(self.valid_action, np.arange(self.action_space.n))))
+        return mask
+
 
 class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
 

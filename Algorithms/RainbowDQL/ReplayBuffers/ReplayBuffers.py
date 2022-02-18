@@ -14,6 +14,7 @@ class ReplayBuffer:
 		self.acts_buf = np.zeros([size], dtype=np.float32)
 		self.rews_buf = np.zeros([size], dtype=np.float32)
 		self.done_buf = np.zeros(size, dtype=np.float32)
+		self.info_buf = np.empty([size], dtype=dict)
 		self.max_size, self.batch_size = size, batch_size
 		self.ptr, self.size, = 0, 0
 
@@ -22,10 +23,10 @@ class ReplayBuffer:
 		self.n_step = n_step
 		self.gamma = gamma
 
-	def store(self, obs: np.ndarray, act: np.ndarray, rew: float, next_obs: np.ndarray, done: bool, ) -> Tuple[
-		np.ndarray, np.ndarray, float, np.ndarray, bool]:
+	def store(self, obs: np.ndarray, act: np.ndarray, rew: float, next_obs: np.ndarray, done: bool, info: dict) -> Tuple[
+		np.ndarray, np.ndarray, float, np.ndarray, bool, dict]:
 
-		transition = (obs, act, rew, next_obs, done)
+		transition = (obs, act, rew, next_obs, done, info)
 		self.n_step_buffer.append(transition)
 
 		# single step transition is not ready
@@ -33,7 +34,7 @@ class ReplayBuffer:
 			return ()
 
 		# make a n-step transition
-		rew, next_obs, done = self._get_n_step_info(self.n_step_buffer, self.gamma)
+		rew, next_obs, done, info = self._get_n_step_info(self.n_step_buffer, self.gamma)
 		obs, act = self.n_step_buffer[0][:2]
 
 		self.obs_buf[self.ptr] = obs
@@ -41,6 +42,7 @@ class ReplayBuffer:
 		self.acts_buf[self.ptr] = act
 		self.rews_buf[self.ptr] = rew
 		self.done_buf[self.ptr] = done
+		self.info_buf[self.ptr] = info
 		self.ptr = (self.ptr + 1) % self.max_size
 		self.size = min(self.size + 1, self.max_size)
 
@@ -55,6 +57,7 @@ class ReplayBuffer:
 			acts=self.acts_buf[idxs],
 			rews=self.rews_buf[idxs],
 			done=self.done_buf[idxs],
+			info=self.info_buf[idxs],
 			# for N-step Learning
 			indices=idxs,
 		)
@@ -68,20 +71,21 @@ class ReplayBuffer:
 			acts=self.acts_buf[idxs],
 			rews=self.rews_buf[idxs],
 			done=self.done_buf[idxs],
+			info=self.info_buf[idxs],
 		)
 
 	@staticmethod
-	def _get_n_step_info(n_step_buffer: Deque, gamma: float) -> Tuple[np.int64, np.ndarray, bool]:
+	def _get_n_step_info(n_step_buffer: Deque, gamma: float) -> Tuple[np.int64, np.ndarray, bool, dict]:
 		"""Return n step rew, next_obs, and done."""
 		# info of the last transition
-		rew, next_obs, done = n_step_buffer[-1][-3:]
+		rew, next_obs, done, info = n_step_buffer[-1][-4:]
 
 		for transition in reversed(list(n_step_buffer)[:-1]):
 			r, n_o, d = transition[-3:]
 			rew = r + gamma * rew * (1 - d)
 			next_obs, done = (n_o, d) if d else (next_obs, done)
 
-		return rew, next_obs, done
+		return rew, next_obs, done, info
 
 	def __len__(self) -> int:
 		return self.size
@@ -123,9 +127,10 @@ class PrioritizedReplayBuffer(ReplayBuffer):
 			rew: float,
 			next_obs: np.ndarray,
 			done: bool,
-	) -> Tuple[np.ndarray, np.ndarray, float, np.ndarray, bool]:
+			info: dict,
+	) -> Tuple[np.ndarray, np.ndarray, float, np.ndarray, bool, dict]:
 		"""Store experience and priority."""
-		transition = super().store(obs, act, rew, next_obs, done)
+		transition = super().store(obs, act, rew, next_obs, done, info)
 
 		if transition:
 			self.sum_tree[self.tree_ptr] = self.max_priority ** self.alpha
@@ -146,6 +151,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
 		acts = self.acts_buf[indices]
 		rews = self.rews_buf[indices]
 		done = self.done_buf[indices]
+		info = self.info_buf[indices]
 		weights = np.array([self._calculate_weight(i, beta) for i in indices])
 
 		return dict(
@@ -154,6 +160,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
 			acts=acts,
 			rews=rews,
 			done=done,
+			info=info,
 			weights=weights,
 			indices=indices,
 		)

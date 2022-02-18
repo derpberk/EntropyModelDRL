@@ -94,7 +94,7 @@ class DuelingDQNAgent:
 		self.prior_eps = prior_eps
 		self.memory = PrioritizedReplayBuffer(obs_dim, memory_size, batch_size, alpha=alpha)
 
-		""" Create the DQN and the DQN-Target """
+		""" Create the DQN and the DQN-Target (noisy if selected) """
 		if self.noisy:
 			self.dqn = NoisyDuelingVisualNetwork(obs_dim, action_dim, number_of_features).to(self.device)
 			self.dqn_target = NoisyDuelingVisualNetwork(obs_dim, action_dim, number_of_features).to(self.device)
@@ -120,6 +120,7 @@ class DuelingDQNAgent:
 		self.episodic_length = []
 		self.episode = 0
 
+		# Sample new noisy parameters
 		if self.noisy:
 			self.dqn.reset_noise()
 			self.dqn_target.reset_noise()
@@ -127,48 +128,26 @@ class DuelingDQNAgent:
 	# TODO: Implement an annealed Learning Rate (see:
 	#  https://pytorch.org/docs/stable/generated/torch.optim.lr_scheduler.ReduceLROnPlateau.html#torch.optim.lr_scheduler.ReduceLROnPlateau)
 
-	def safe_select_action(self, state: np.ndarray) -> np.ndarray:
-
-		if self.epsilon > np.random.rand() and not self.noisy:
-			valid = False
-			while not valid:
-				selected_action = self.env.action_space.sample()
-				valid = self.env.valid_action(selected_action)
-		else:
-			q_values = self.dqn(torch.FloatTensor(state).unsqueeze(0).to(self.device)).detach().cpu().numpy()
-			all_actions = np.arange(self.env.action_space.n)
-			mask = np.array(list(map(self.env.valid_action, all_actions)))
-			selected_action = np.argmax((q_values + np.abs(np.min(q_values)))*mask)
-
-		if not self.is_eval:
-			# Save transition for memory replay
-			self.transition = [state, selected_action]
-
-		return selected_action
-
-
 	def select_action(self, state: np.ndarray) -> np.ndarray:
 		"""Select an action from the input state. If deterministic, no noise is applied. """
 
 		if self.epsilon > np.random.rand() and not self.noisy:
 			selected_action = self.env.action_space.sample()
-		else:
+		elif not self.safe_action:
 			selected_action = self.dqn(torch.FloatTensor(state).unsqueeze(0).to(self.device)).argmax()
 			selected_action = selected_action.detach().cpu().numpy()
-
-		if not self.is_eval:
-			# Save transition for memory replay
-			self.transition = [state, selected_action]
+		else:
+			q_values = self.dqn(torch.FloatTensor(state).unsqueeze(0).to(self.device)).detach().cpu().numpy()
+			mask = self.env.get_action_mask()
+			q_values.squeeze(0)[mask == False] = -np.inf
+			selected_action = np.argmax(q_values)
 
 		return selected_action
 
 	def step(self, action: np.ndarray) -> Tuple[np.ndarray, np.float64, bool]:
 		"""Take an action and return the response of the env."""
-		next_state, reward, done, _ = self.env.step(action)
 
-		if not self.is_eval:
-			self.transition += [reward, next_state, done]
-			self.memory.store(*self.transition)
+		next_state, reward, done, _ = self.env.step(action)
 
 		return next_state, reward, done
 
@@ -184,6 +163,7 @@ class DuelingDQNAgent:
 		elementwise_loss = self._compute_dqn_loss(samples)
 		loss = torch.mean(elementwise_loss * weights)
 
+		# Compute gradients and apply them
 		self.optimizer.zero_grad()
 		loss.backward()
 		self.optimizer.step()
@@ -193,7 +173,7 @@ class DuelingDQNAgent:
 		new_priorities = loss_for_prior + self.prior_eps
 		self.memory.update_priorities(indices, new_priorities)
 
-		# Reset the noisy layers
+		# Sample new noisy distribution
 		if self.noisy:
 			self.dqn.reset_noise()
 			self.dqn_target.reset_noise()
@@ -201,7 +181,7 @@ class DuelingDQNAgent:
 		return loss.item()
 
 	@staticmethod
-	def anneal_epsilon(p, p_init=0.1, p_fin=0.9, e_init=1.0, e_fin = 0.0):
+	def anneal_epsilon(p, p_init=0.1, p_fin=0.9, e_init=1.0, e_fin=0.0):
 
 		if p < p_init:
 			return e_init
@@ -223,12 +203,11 @@ class DuelingDQNAgent:
 	def train(self, episodes):
 		""" Train the agent. """
 
+		# Optimization steps #
 		steps = 0
-
 		# Create train logger #
 		if self.writer is None:
 			self.writer = SummaryWriter(log_dir=self.logdir, filename_suffix=self.experiment_name)
-
 		# Agent in training mode #
 		self.is_eval = False
 		# Reset episode count #
@@ -236,7 +215,6 @@ class DuelingDQNAgent:
 		# Reset metrics #
 		episodic_reward_vector = []
 		record = -np.inf
-		self.epsilon = 1.0
 
 		for episode in range(1, int(episodes) + 1):
 
@@ -246,6 +224,7 @@ class DuelingDQNAgent:
 			length = 0
 			losses = []
 
+			# Initially sample noisy policy #
 			if self.noisy:
 				self.dqn.reset_noise()
 				self.dqn_target.reset_noise()
@@ -260,18 +239,38 @@ class DuelingDQNAgent:
 			                                   e_init=self.epsilon_values[0],
 			                                   e_fin=self.epsilon_values[1])
 
+			# Run an episode #
 			while not done:
 
-				steps+=1
+				# Inrease the plaed steps #
+				steps += 1
 
-				if not self.safe_action:
-					action = self.select_action(state)
-				else:
-					action = self.safe_select_action(state)
+				# Select the action using the current policy
+				action = self.select_action(state)
+
+				# Perform the action and retrieve the next state. #
+				if self.safe_action:
+					safe_mask = self.env.get_action_mask()
 
 				next_state, reward, done = self.step(action)
 
+				if self.safe_action:
+					safe_mask_ = self.env.get_action_mask()
+
+				# Compute the safe mask for the transition #
+				if self.safe_action:
+					info = {'safe_mask': safe_mask,
+					        'safe_mask_': safe_mask_}
+				else:
+					info = {}
+
+				# Store the transition
+				self.transition = [state, action, reward, next_state, done, info]
+				self.memory.store(*self.transition)
+
+				# Update the state
 				state = next_state
+				# Accumulate indicators
 				score += reward
 				length += 1
 
@@ -299,14 +298,15 @@ class DuelingDQNAgent:
 						record = mean_episodic_reward
 						self.save_model(name='BestPolicy.pth')
 
-				# if training is ready
+				# If training is ready
 				if len(self.memory) >= self.batch_size and episode >= self.learning_starts and steps % self.train_every == 0:
 
+					# Update model parameters by backprop-bootstrapping #
 					loss = self.update_model()
+					# Append loss #
 					losses.append(loss)
 
-					# if hard update is needed
-
+					# Update target soft/hard #
 					if self.soft_update:
 						self._target_soft_update()
 					elif episode % self.target_update == 0 and done:
@@ -315,56 +315,8 @@ class DuelingDQNAgent:
 		# Save the final policy #
 		self.save_model(name='FINALPolicy.pth')
 
-	def evaluate_policy(self, episodes=1, render=False):
-		"""Evaluate the current policy."""
-
-		self.is_eval = True
-
-		scores = []
-		entropies = []
-		redundant = 0
-
-		for e in range(episodes):
-
-			state = self.env.reset()
-
-			if render:
-				self.env.render()
-
-			done = False
-			score = 0
-
-			while not done:
-
-				if not self.safe_action:
-					action = self.select_action(state)
-				else:
-					action = self.safe_select_action(state)
-
-				next_state, reward, done = self.step(action)
-
-				state = next_state
-				score += reward
-
-				if reward == -0.5:
-					redundant +=1
-
-				if render:
-					self.env.render()
-
-			print(f"Episode {e} total score: {score}")
-			scores.append(score)
-			entropies.append(self.env.trace)
-
-		print(f"Mean Reward: {np.mean(scores)} +- {np.std(scores)}")
-		print(f"Mean Trace: {np.mean(entropies)} +- {np.std(entropies)}")
-		print(f"Mean redundant: {redundant/episodes}")
-
-		self.is_eval = False
-
-		return entropies
-
 	def _compute_dqn_loss(self, samples: Dict[str, np.ndarray]) -> torch.Tensor:
+
 		"""Return dqn loss."""
 		device = self.device  # for shortening the following lines
 		state = torch.FloatTensor(samples["obs"]).to(device)
@@ -375,10 +327,26 @@ class DuelingDQNAgent:
 
 		# G_t   = r + gamma * v(s_{t+1})  if state != Terminal
 		#       = r                       otherwise
+
 		curr_q_value = self.dqn(state).gather(1, action)
-		next_q_value = self.dqn_target(next_state).max(dim=1, keepdim=True)[0].detach()
-		mask = 1 - done
-		target = (reward + self.gamma * next_q_value * mask).to(self.device)
+		done_mask = 1 - done
+
+		with torch.no_grad():
+
+			if self.safe_action:
+				info_dictionaries = samples["info"]
+				unsafe_next_q_values = self.dqn_target(next_state)
+
+				for mask_dictionary, q_values in zip(info_dictionaries, unsafe_next_q_values):
+
+					q_values[mask_dictionary['safe_mask_'] == False] = -np.inf
+
+				next_q_value = unsafe_next_q_values.max(dim=1, keepdim=True)[0]
+
+			else:
+				next_q_value = self.dqn_target(next_state).max(dim=1, keepdim=True)[0]
+
+			target = (reward + self.gamma * next_q_value * done_mask).to(self.device)
 
 		# calculate element-wise dqn loss
 		elementwise_loss = F.mse_loss(curr_q_value, target, reduction="none")
@@ -412,6 +380,6 @@ class DuelingDQNAgent:
 
 		self.dqn.load_state_dict(torch.load(path_to_file, map_location=self.device))
 
-	def save_model(self, name = 'experiment.pth'):
+	def save_model(self, name='experiment.pth'):
 
 		torch.save(self.dqn.state_dict(), self.writer.log_dir + '/' + name)
