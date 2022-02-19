@@ -634,7 +634,7 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
             self.GroundTruth_field = self.GroundTruth.sample_gt()
 
             v = np.random.random(size=(len(self.random_peaks), 2)) * 2 - 1.0
-            self.random_peaks = self.random_peaks + v
+            self.random_peaks = np.clip(self.random_peaks + v, (0,0), np.array(self.navigation_map.shape())-1)
 
 
         """ Produce new state """
@@ -688,9 +688,9 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
 
     def update_metrics(self):
 
-        self.metrics_dict["Entropy"] += self.trace * self.dt
-        self.metrics_dict["Area"] += np.sum(self.state[-1, self.visitable_locations[:, 0], self.visitable_locations[:, 1]] < 0.05) * self.dt
-        self.metrics_dict["DetectionRate"] += np.sum(self.state[-1, self.random_peaks[:, 0].astype(int), self.random_peaks[:, 1].astype(int)] < 0.05) / 10 * self.dt
+        self.metrics_dict["Entropy"] = self.trace
+        self.metrics_dict["Area"] += np.sum(self.state[-1, self.visitable_locations[:, 0], self.visitable_locations[:, 1]] < 0.05)
+        self.metrics_dict["DetectionRate"] += np.sum(self.state[-1, self.random_peaks[:, 0].astype(int), self.random_peaks[:, 1].astype(int)] < 0.05) / 10
 
         return self.metrics_dict
 

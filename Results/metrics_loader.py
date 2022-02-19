@@ -1,4 +1,4 @@
-from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C
+from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C, WhiteKernel
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.svm import SVR
 from sklearn.metrics import mean_squared_error
@@ -19,7 +19,7 @@ class metric_constructor:
 		self.MSE_GP = []
 		self.MSE_SVR = []
 
-		kernel = C(1.0) * RBF(length_scale=5)
+		kernel = C(1.0) * RBF(length_scale=5, length_scale_bounds=(1e-7, 1e7)) + WhiteKernel(noise_level=0.00001,noise_level_bounds=(1e-7, 1e7))
 		self.gp = GaussianProcessRegressor(kernel=kernel, alpha=1E-5)
 		self.svr = SVR(C=1E5)
 		self.data_vector = []
