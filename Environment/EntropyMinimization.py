@@ -491,7 +491,7 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
                  max_distance=400,
                  random_init_point=False,
                  termination_condition=True,
-                 dt=0.1
+                 dt=0.1,
                  ):
 
         super().__init__(navigation_map=navigation_map,
@@ -509,10 +509,11 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
                          random_init_point=random_init_point,
                          termination_condition=termination_condition)
 
-        self.GroundTruth.dt = 0.01
+        self.GroundTruth.dt = 0.02
         self.sample_times = None
         self.dt = dt
         self.metrics_dict = None
+        self.is_eval = False
 
     def reset(self):
         """ Reset the environment """
@@ -539,7 +540,6 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
         self.measured_values, self.measured_locations = self.fleet.measure(gt_field=self.GroundTruth_field)
         self.sample_times = np.zeros_like(self.measured_values)
         """ Update the covariance matrix and the trace"""
-        self.tr0 = np.sum(np.real(np.linalg.eigvals(self.kernel(self.evaluation_locations))))
         self.covariance_matrix = conditioning_cov_matrix_with_time(self.evaluation_locations, self.measured_locations,
                                                                    self.kernel, sample_times=self.sample_times,
                                                                    time=0.0, weights=1)
@@ -630,17 +630,23 @@ class BaseTemporalEntropyMinimization(BaseEntropyMinimization):
             reward = self.reward()
 
             """ Update ground truth dynamic """
-            self.GroundTruth.step()
-            self.GroundTruth_field = self.GroundTruth.sample_gt()
+            if self.is_eval:
+                self.GroundTruth.step()
+                self.GroundTruth_field = self.GroundTruth.sample_gt()
 
-            v = np.random.random(size=(len(self.random_peaks), 2)) * 2 - 1.0
-            self.random_peaks = np.clip(self.random_peaks + v, (0,0), np.array(self.navigation_map.shape())-1)
+                v = np.random.random(size=(len(self.random_peaks), 2)) * 2 - 1.0
+                self.random_peaks = np.clip(self.random_peaks + v, (0,0), np.array(self.navigation_map.shape)-1)
 
 
         """ Produce new state """
         self.state = self.update_state()
 
-        return self.state, reward, done, self.update_metrics()
+        if self.is_eval:
+            metrics = self.update_metrics()
+        else:
+            metrics = {}
+
+        return self.state, reward, done, metrics
 
     def step_to_position(self, desired_positions):
         """ Travel to the given position and take a sample """
