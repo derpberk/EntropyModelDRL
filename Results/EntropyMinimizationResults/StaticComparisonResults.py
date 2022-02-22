@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 # Mix results #
 
 metric = 'MSE_SVR'
-df_drl = pandas.read_csv('./DRL_noisy_static.csv')
+df_drl = pandas.read_csv('./DRL_safe.csv')
 df_drl['Algorithm'] = 'DRL'
 df_lm = pandas.read_csv('./LawnMowerResults')
 df_lm['Algorithm'] = 'Lawn Mower'
@@ -23,7 +23,7 @@ sns.set_theme()
 sns.set(rc={'figure.figsize':(6,4)})
 g = sns.lineplot(data=all_data, x='Distance', y=metric, hue='Algorithm', style='Algorithm')
 
-g.set(ylabel='Mean Squared Error')
+g.set(ylabel=r'Mean Squared Error')
 g.set(xlabel='Distance $(km)$')
 g.set(xlim=(0, 45))
 g.set(yscale='log')

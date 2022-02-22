@@ -1,9 +1,18 @@
 from Algorithms.RainbowDQL.Agent.DuelingDQNAgent import DuelingDQNAgent
 import numpy as np
-from Environment.EntropyMinimization import BaseEntropyMinimization
+from Environment.EntropyMinimization import BaseEntropyMinimization, BaseTemporalEntropyMinimization
+import warnings
+
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")
+
 from Results.metrics_loader import metric_constructor
 from utils import plot_trajectory
 import matplotlib.pyplot as plt
+
+
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")
 
 navigation_map = np.genfromtxt('../../Environment/ypacarai_map_middle.csv')
 initial_position = [[30, 38]]
@@ -17,14 +26,16 @@ environment_args = {'navigation_map': navigation_map,
                     'lengthscale': 5,
                     'initial_seed': 0,
                     'collision_penalty': -1,
-                    'max_distance': 200,
+                    'max_distance': 500,
                     'number_of_trials': 5,
                     'number_of_actions': 8,
-                    'random_init_point': False,
-                    'termination_condition': False
+                    'random_init_point': True,
+                    'termination_condition': False,
+                    'dt': 0.03,
                     }
 
-env = BaseEntropyMinimization(**environment_args)
+env = BaseTemporalEntropyMinimization(**environment_args)
+env.is_eval = True
 
 agent_args = {'env': env,
               'memory_size': 100000,
@@ -40,24 +51,25 @@ agent_args = {'env': env,
               'alpha': 0.5,
               'beta': 0.4,
               'prior_eps': 1e-6,
-              'noisy': True,
+              'noisy': False,
               'logdir': None,
               'log_name': "Experiment",
               'safe_actions': True}
 
 agent = DuelingDQNAgent(**agent_args)
 agent.epsilon = 0
-policy_path = '/Users/samuel/Desktop/runs/Baselines_Noisy/BestPolicy.pth'
+policy_path = '/Users/samuel/Desktop/runs/Temporal_PER_dueling_epsilongreedy/BestPolicy.pth'
 
 agent.load_model(policy_path)
 
 number_of_trials = 100
 
-metric_recorder = metric_constructor('./DRL_noisy_static.csv')
-draw = True
+metric_recorder = metric_constructor('./DRL_temporal_epsilongreedy.csv')
+draw = False
 
 for t in range(number_of_trials):
 
+	print(f"Run {t}")
 	# Reset
 	s = env.reset()
 	d = False
@@ -65,8 +77,7 @@ for t in range(number_of_trials):
 
 	while not d:
 		# Take action
-		a = agent.safe_select_action(s)
-		agent.dqn.reset_noise()
+		a = agent.select_action(s)
 
 		s, r, d, i = env.step(a)
 

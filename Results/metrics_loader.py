@@ -44,8 +44,8 @@ class metric_constructor:
 		self.DI.append(di)
 
 		# Fit and Obstain model #
-		self.gp.fit(meas_locs, meas_vals)
-		self.svr.fit(meas_locs, meas_vals)
+		self.gp.fit(meas_locs[-60:], meas_vals[-60:])
+		self.svr.fit(meas_locs[-60:], meas_vals[-60:])
 		self.MSE_GP.append(mean_squared_error(y_true=true_vals, y_pred=self.gp.predict(visitable_locs)))
 		self.MSE_SVR.append(mean_squared_error(y_true=true_vals, y_pred=self.svr.predict(visitable_locs)))
 

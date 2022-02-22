@@ -26,16 +26,16 @@ environment_args = {'navigation_map': navigation_map,
                     'initial_seed': 0,
                     'collision_penalty': -1,
                     'max_distance': 200,
-                    'number_of_trials': 12,
+                    'number_of_trials': 25,
                     'number_of_actions': 8,
                     'random_init_point': True,
                     'termination_condition': False,
-                    #'dt': 0.05,
+                    'dt': 0.05,
                     }
 
-env = BaseEntropyMinimization(**environment_args)
+#env = BaseEntropyMinimization(**environment_args)
 
-#env = BaseTemporalEntropyMinimization(**environment_args)
+env = BaseTemporalEntropyMinimization(**environment_args)
 
 agent_args = {'env': env,
               'memory_size': 100000,

@@ -25,23 +25,27 @@ environment_args = {'navigation_map': navigation_map,
                     'lengthscale': 5,
                     'initial_seed': 0,
                     'collision_penalty': -1,
-                    'max_distance': 200,
+                    'max_distance': 500,
                     'number_of_trials': 5,
                     'number_of_actions': 8,
                     'random_init_point': False,
-                    'termination_condition': False
+                    'termination_condition': False,
+                    'dt': 0.03,
                     }
 
-env = BaseEntropyMinimization(**environment_args)
+env = BaseTemporalEntropyMinimization(**environment_args)
 env.reset()
 # N executions of the algorithm
-N = 100
-draw = True
+N = 50
+draw = False
 
 def reverse_action(a):
     return (a + 4) % 8
 
 metric_recorder = metric_constructor('../Results/EntropyMinimizationResults/StaticRandomCoverage.csv')
+
+dets = []
+infos = []
 
 for t in range(N):
     env.reset()
@@ -60,8 +64,10 @@ for t in range(N):
             valid = env.valid_action(new_a)
         a = new_a
 
+        env.render()
         s, r, done, m = env.step(a)
 
+        """
         metric_recorder.record_step(r,
                                     m['Entropy'],
                                     m['Area'],
@@ -71,7 +77,7 @@ for t in range(N):
                                     env.measured_values.squeeze(1),
                                     env.visitable_locations,
                                     env.GroundTruth_field[env.visitable_locations[:, 0], env.visitable_locations[:, 1]])
-
+        """
     if draw:
         with plt.style.context('seaborn-dark'):
             fig, ax = plt.subplots(1, 1)
@@ -90,7 +96,10 @@ for t in range(N):
 
     metric_recorder.record_finish(t=t)
 
-metric_recorder.record_save()
+plt.scatter(infos, dets)
+plt.show()
+
+#metric_recorder.record_save()
 
 """
 	plot_trajectory(env.axs[2], env.fleet.vehicles[0].waypoints[:, 1], env.fleet.vehicles[0].waypoints[:, 0], z=None,
