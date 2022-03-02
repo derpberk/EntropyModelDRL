@@ -28,21 +28,23 @@ environment_args = {'navigation_map': navigation_map,
                     'max_distance': 500,
                     'number_of_trials': 5,
                     'number_of_actions': 8,
-                    'random_init_point': False,
+                    'random_init_point': True,
                     'termination_condition': False,
                     'dt': 0.03,
                     }
 
+# Create environment #
 env = BaseTemporalEntropyMinimization(**environment_args)
+env.is_eval = True
 env.reset()
 # N executions of the algorithm
-N = 50
-draw = True
+N = 20
+draw = False
 
 def reverse_action(a):
     return (a + 4) % 8
 
-metric_recorder = metric_constructor('../Results/EntropyMinimizationResults/StaticRandomCoverage.csv')
+metric_recorder = metric_constructor('../Results/EntropyMinimizationResults/TemporalRandomCoverage.csv', temporal=True)
 
 dets = []
 infos = []
@@ -54,6 +56,7 @@ for t in range(N):
     env.reset()
     env.reset()
     env.reset()
+    env.render()
     a = env.action_space.sample()
     metric_recorder.record_new()
     new_a = a
@@ -69,20 +72,23 @@ for t in range(N):
             valid = env.valid_action(new_a)
         a = new_a
 
-        env.render()
-        s, r, done, m = env.step(a)
+        s, r, done, i = env.step(a)
 
-        """
+        env.render()
+        print(i['DetectionRate'])
+
         metric_recorder.record_step(r,
-                                    m['Entropy'],
-                                    m['Area'],
-                                    m['DetectionRate'],
+                                    i['Entropy'],
+                                    i['Area'],
+                                    i['DetectionRate'],
                                     np.sum(env.fleet.get_distances()),
                                     env.measured_locations,
-                                    env.measured_values.squeeze(1),
+                                    np.asarray(env.measured_values).squeeze(1),
                                     env.visitable_locations,
-                                    env.GroundTruth_field[env.visitable_locations[:, 0], env.visitable_locations[:, 1]])
-        """
+                                    env.GroundTruth_field[env.visitable_locations[:, 0], env.visitable_locations[:, 1]],
+                                    horizon=60,
+                                    sample_times=env.sample_times)
+
     if draw:
         with plt.style.context('seaborn-dark'):
             fig, ax = plt.subplots(1, 1)
@@ -104,10 +110,5 @@ for t in range(N):
 plt.scatter(infos, dets)
 plt.show()
 
-#metric_recorder.record_save()
+metric_recorder.record_save()
 
-"""
-	plot_trajectory(env.axs[2], env.fleet.vehicles[0].waypoints[:, 1], env.fleet.vehicles[0].waypoints[:, 0], z=None,
-	                colormap='jet',
-	                num_of_points=500, linewidth=4, k=3, plot_waypoints=False, markersize=0.5)
-"""

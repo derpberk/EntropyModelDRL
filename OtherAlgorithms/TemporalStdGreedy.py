@@ -1,25 +1,21 @@
-from Algorithms.RainbowDQL.Agent.DuelingDQNAgent import DuelingDQNAgent
 import numpy as np
+import random
 from Environment.EntropyMinimization import BaseEntropyMinimization, BaseTemporalEntropyMinimization
+from EnvironmentUtils import AStarPlanner
 from Results.metrics_loader import metric_constructor
 from utils import plot_trajectory
 import matplotlib.pyplot as plt
+seed = 232
 
+np.random.seed(seed)
+random.seed(seed)
 
-parameters = {
-	'epsilongreedy': {'noisy': False, 'safe_actions': False},
-	'noisy': {'noisy': True, 'safe_actions': True},
-	'safe': {'noisy': True, 'safe_actions': True},
-}
-
-#ALGORITHM = 'noisy'
-ALGORITHM = 'safe'
-# ALGORITHM = 'epsilongreedy'
-
-navigation_map = np.genfromtxt('../../Environment/ypacarai_map_middle.csv')
+# train
+navigation_map = np.genfromtxt('../Environment/ypacarai_map_middle.csv')
 initial_position = [[30, 38]]
 
-# Environment parameters #
+""" ----------------------- EXPERIMENT SETUP ----------------------- """
+
 environment_args = {'navigation_map': navigation_map,
                     'number_of_agents': 1,
                     'initial_positions': initial_position,
@@ -40,49 +36,46 @@ environment_args = {'navigation_map': navigation_map,
 # Create environment #
 env = BaseTemporalEntropyMinimization(**environment_args)
 env.is_eval = True
-# Agent parameter #
-agent_args = {'env': env,
-              'memory_size': 100000,
-              'batch_size': 64,
-              'target_update': 100,
-              'soft_update': True,
-              'tau': 0.001,
-              'epsilon_values': [1.0, 0.1],
-              'epsilon_interval': [0.1, 0.8],
-              'learning_starts': 10,
-              'gamma': 0.99,
-              'lr': 1e-4,
-              'alpha': 0.5,
-              'beta': 0.4,
-              'prior_eps': 1e-6,
-              'noisy': parameters[ALGORITHM]['noisy'],
-              'logdir': None,
-              'log_name': "Experiment",
-              'safe_actions': parameters[ALGORITHM]['safe_actions']}
+env.reset()
+planner = AStarPlanner(env.navigation_map, 1, 0.5)
+# N executions of the algorithm
+N = 20
 
-# Create agent #
-agent = DuelingDQNAgent(**agent_args)
-agent.epsilon = 0.05
-# Load policy #
-policy_path = f'/Users/samuel/Desktop/runs/Temporal_Noisy/BestPolicy.pth'
-agent.load_model(policy_path)
 
-number_of_trials = 20
-metric_recorder = metric_constructor(f'./DRL_temporal_{ALGORITHM}.csv', temporal=True)
+def reverse_action(a):
+	return (a + 4) % 8
+
+
+metric_recorder = metric_constructor('../Results/EntropyMinimizationResults/Temporal_std_greedy.csv', temporal=True)
 draw = False
+masksize = 10
+for t in range(N):
 
-for t in range(number_of_trials):
-
-	print(f"Run {t}")
 	s = env.reset()
-	d = False
 	metric_recorder.record_new()
+	done = False
+	goal_achieved = True
 
-	while not d:
-		# Take action
-		a = agent.select_action(s)
+	while not done:
 
-		s, r, d, i = env.step(a)
+		mask = np.zeros_like(s[-1])
+		mask[int(env.fleet.vehicles[0].position[0])-masksize:int(env.fleet.vehicles[0].position[0])+masksize+1,
+		int(env.fleet.vehicles[0].position[1])-masksize:int(env.fleet.vehicles[0].position[1])+masksize+1] = 1
+		highest_std_location = np.array(np.unravel_index(np.argmax(s[-1]*mask), shape=s[-1].shape))
+		path = np.asarray(planner.planning(list(highest_std_location), list(env.fleet.vehicles[0].position))).T
+
+		distance_mask = np.where(np.linalg.norm(path-env.fleet.vehicles[0].position, axis=1) < 4)[0][-1]
+		next_position = path[distance_mask]
+
+		angle_dif = np.arctan2(next_position[1]-env.fleet.vehicles[0].position[1], next_position[0]-env.fleet.vehicles[0].position[0])
+		angle_dif = 2*np.pi + angle_dif if angle_dif < 0 else angle_dif
+
+		a = np.argmin(np.abs(angle_dif-env.angle_set))
+
+		while not env.valid_action(a):
+			a = env.action_space.sample()
+
+		s, r, done, i = env.step(a)
 
 		metric_recorder.record_step(r,
 		                            i['Entropy'],
@@ -92,7 +85,7 @@ for t in range(number_of_trials):
 		                            env.measured_locations,
 		                            np.asarray(env.measured_values).squeeze(1),
 		                            env.visitable_locations,
-		                            env.GroundTruth_field[env.visitable_locations[:,0], env.visitable_locations[:,1]],
+		                            env.GroundTruth_field[env.visitable_locations[:, 0], env.visitable_locations[:, 1]],
 		                            horizon=60,
 		                            sample_times=env.sample_times)
 
@@ -115,3 +108,5 @@ for t in range(number_of_trials):
 	metric_recorder.record_finish(t=t)
 
 metric_recorder.record_save()
+
+

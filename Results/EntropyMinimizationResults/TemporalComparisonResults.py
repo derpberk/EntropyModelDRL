@@ -4,30 +4,31 @@ import matplotlib.pyplot as plt
 
 # Mix results #
 
-metric = 'MSE_SVR'
-df_drl = pandas.read_csv('./DRL_safe.csv')
+metric = 'Entropy'
+df_drl = pandas.read_csv('./DRL_temporal_noisy.csv')
 df_drl['Algorithm'] = 'DRL'
-df_lm = pandas.read_csv('./LawnMowerResults')
+df_lm = pandas.read_csv('./TemporalLawnMowerResults.csv')
 df_lm['Algorithm'] = 'Lawn Mower'
-df_rn = pandas.read_csv('./StaticFullRandom.csv')
+df_rn = pandas.read_csv('./TemporalFullRandom.csv')
 df_rn['Algorithm'] = 'Random'
-df_rc = pandas.read_csv('./StaticRandomCoverage.csv')
+df_rc = pandas.read_csv('./TemporalRandomCoverage.csv')
 df_rc['Algorithm'] = 'Coverage'
-df_gr = pandas.read_csv('./std_greedy.csv')
+df_gr = pandas.read_csv('./Temporal_std_greedy.csv')
 df_gr['Algorithm'] = 'Greedy $\sigma$'
 
 all_data = pandas.concat([df_drl,df_lm,df_rn,df_rc,df_gr], ignore_index=True)
 all_data['Distance'] = all_data['Distance']*45/200
-all_data['A_vector'] = all_data['A_vector']* (0.225**2)
+all_data['A_vector'] = all_data['A_vector']*(0.225**2)
 
 sns.set_theme()
-sns.set(rc={'figure.figsize':(6,4)})
+sns.set(rc={'figure.figsize':(6,2)})
 g = sns.lineplot(data=all_data, x='Distance', y=metric, hue='Algorithm', style='Algorithm')
+plt.legend(fontsize=10)
 
-g.set(ylabel=r'Mean Squared Error')
+g.set(ylabel=r'Information $I(X)$')
 g.set(xlabel='Distance $(km)$')
-g.set(xlim=(0, 45))
-g.set(yscale='log')
+g.set(xlim=(0, 45*5/2))
+
 
 final_metrics = all_data.loc[all_data['Distance'] >= 45]
 
